@@ -1,5 +1,10 @@
 package org.example;
 
+import org.example.models.Drone;
+import org.example.models.Location;
+import org.example.models.Obstacle;
+import org.example.models.WeatherZone;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,6 +54,7 @@ public class Route {
         calculateTotalDistanceAndCost();
     }
 
+
     private void calculateTotalDistanceAndCost() {
         if (locations.isEmpty()) {
             return;
@@ -66,45 +72,53 @@ public class Route {
         double remainingCapacity = drone.getPayloadCapacity();
         double currentTime = 0;
 
-        List<Location> routeSequence = new ArrayList<>(locations);
-        if (!routeSequence.getFirst().equals(depot)) {
-            routeSequence.addFirst(depot);
-        }
-        if (!routeSequence.getLast().equals(depot)) {
-            routeSequence.add(depot);
+        // Create a proper route sequence that always starts and ends with depot
+        List<Location> routeSequence = new ArrayList<>();
+        routeSequence.add(depot); // Always start at depot
+
+        // Add all non-depot locations from original sequence
+        for (Location loc : locations) {
+            if (!loc.equals(depot)) {
+                routeSequence.add(loc);
+            }
         }
 
-        for (Location nextLocation : locations) {
-            // Skip if current and next location are the same
-            if (currentLocation.getId() == nextLocation.getId()) {
-                continue;
-            }
+        if (!routeSequence.getLast().equals(depot)) {
+            routeSequence.add(depot); // Always end at depot
+        }
+
+        // Now process the route
+        for (int i = 1; i < routeSequence.size(); i++) {
+            Location nextLocation = routeSequence.get(i);
 
             // Calculate distance between current and next location
             double distanceToNext = calculateDistance(currentLocation, nextLocation);
 
-            // Check for intersections with weather zones and add penalties
+            // Check for intersections with weather zones and obstacles
             distanceToNext += calculateWeatherPenalty(currentLocation, nextLocation);
-
-            // Check for intersections with obstacles and add penalties
             distanceToNext += calculateObstaclePenalty(currentLocation, nextLocation);
 
+            // Update total distance
+            totalDistance += distanceToNext;
+
             // Calculate energy required for this leg
-            double energyRequired = calculateEnergyRequirement(distanceToNext, nextLocation.getDemand());
+            double energyRequired = calculateEnergyRequirement(distanceToNext,
+                    nextLocation.getDemand());
 
             // Check if we need to recharge
             if (batteryLevel - energyRequired < drone.getMinBattery()) {
                 Location nearestStation = findNearestRechargeStation(currentLocation);
-                if (nearestStation != null) {
+                if (nearestStation != null && !nearestStation.equals(currentLocation)) {
                     // Calculate distance to station
                     double distanceToStation = calculateDistance(currentLocation, nearestStation);
-                    double energyToStation = calculateEnergyRequirement(distanceToStation, nextLocation.getDemand());
+                    double energyToStation = calculateEnergyRequirement(distanceToStation, 0);
 
                     // Calculate distance from station to next location
                     double distanceFromStation = calculateDistance(nearestStation, nextLocation);
-                    double energyFromStation = calculateEnergyRequirement(distanceFromStation, nextLocation.getDemand());
+                    double energyFromStation = calculateEnergyRequirement(distanceFromStation,
+                            nextLocation.getDemand());
 
-                    // Update total distance
+                    // Update total distance (adding detour)
                     totalDistance += distanceToStation + distanceFromStation - distanceToNext;
 
                     // Update battery level after reaching station
@@ -113,28 +127,33 @@ public class Route {
                     // Recharge
                     batteryLevel = drone.getMaxBattery();
                     totalCost += drone.getRechargingCost();
-                    totalTravelTime += drone.getRechargingTime();
+
+                    // Add recharging time
+                    double rechargingTime = drone.getRechargingTime() / 60.0; // Convert to hours
+                    totalTravelTime += rechargingTime;
+                    currentTime += rechargingTime;
 
                     // Continue to destination
                     batteryLevel -= energyFromStation;
                 } else {
                     // No station available, we'll just continue and deplete the battery
-                    // In a real system, this would be an error condition
                     batteryLevel -= energyRequired;
                 }
             } else {
                 // We have enough battery, just continue
                 batteryLevel -= energyRequired;
-                totalDistance += distanceToNext;
             }
 
-            // In capacity constraint check
-            if (remainingCapacity < nextLocation.getDemand()) {
-                totalCost += 1000;
-                capacityViolations++;  // Add this line
+            // Update capacity
+            if (nextLocation.getDemand() > 0) {
+                if (remainingCapacity < nextLocation.getDemand()) {
+                    capacityViolations++;
+                    totalCost += 1000; // Penalty
+                }
+                remainingCapacity -= nextLocation.getDemand();
             }
 
-            // Calculate arrival time
+            // Calculate travel time in hours (distance / speed)
             double travelTime = distanceToNext / drone.getSpeed();
             totalTravelTime += travelTime;
             currentTime += travelTime;
@@ -148,47 +167,22 @@ public class Route {
                 totalTravelTime += waitingTime;
             } else if (currentTime > timeWindow[1]) {
                 // We arrived too late, add a penalty
-                totalCost += 500; // Add a late arrival penalty
+                totalCost += 500; // Late arrival penalty
                 timeWindowViolations++;
             }
 
-            // Add service time
-            currentTime += nextLocation.getServiceTime();
-            totalTravelTime += nextLocation.getServiceTime();
+            // Add service time (convert from minutes to hours)
+            double serviceTimeHours = nextLocation.getServiceTime() / 60.0;
+            currentTime += serviceTimeHours;
+            totalTravelTime += serviceTimeHours;
 
             // Update current location
             currentLocation = nextLocation;
         }
 
-        // Add return to depot if needed
-        if (currentLocation.getId() != depot.getId()) {
-            double distanceToDepot = calculateDistance(currentLocation, depot);
-            double energyToDepot = calculateEnergyRequirement(distanceToDepot, 0); // No more payload
-
-            if (batteryLevel - energyToDepot < 0) {
-                // Need to recharge to get back to depot
-                Location nearestStation = findNearestRechargeStation(currentLocation);
-                if (nearestStation != null) {
-                    double distanceToStation = calculateDistance(currentLocation, nearestStation);
-                    double energyToStation = calculateEnergyRequirement(distanceToStation, 0);
-
-                    double distanceFromStation = calculateDistance(nearestStation, depot);
-
-                    totalDistance += distanceToStation + distanceFromStation;
-                    totalCost += drone.getRechargingCost();
-                    totalTravelTime += drone.getRechargingTime();
-                } else {
-                    totalDistance += distanceToDepot;
-                }
-            } else {
-                totalDistance += distanceToDepot;
-            }
-        }
-
         // Calculate the total cost based on distance and other factors
         totalCost += totalDistance * 0.1; // Basic cost per distance
     }
-
     private double calculateEnergyRequirement(double distance, double payload) {
         return distance * (drone.getBaseEnergyConsumption() + payload * drone.getPayloadEnergyCoefficient());
     }

@@ -1,1 +1,0 @@
-# xMin,xMax,yMin,yMax,windSpeed,windAngle

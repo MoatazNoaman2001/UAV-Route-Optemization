@@ -1,6 +1,10 @@
 package org.example;
+import org.example.models.Drone;
+import org.example.models.Location;
+import org.example.models.Obstacle;
+import org.example.models.WeatherZone;
+
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class Algorithm {
     private List<Drone> drones;

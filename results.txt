@@ -1,0 +1,60 @@
+Optimal Route Details:
+Total Distance: 1148.252153354043 km
+Total Cost: $4114.825215335404
+Total Travel Time: 63.4325081392431 hours
+Time Window Violations: 0
+Capacity Violations: 4
+
+======================================================
+INPUT SUMMARY
+======================================================
+Locations (10):
+  depot: 1
+  charging_station: 2
+  customer: 7
+
+Drones (4):
+  Drone 0: 10.0kg capacity | 1000.0km range
+  Drone 1: 8.0kg capacity | 533.3km range
+  Drone 2: 15.0kg capacity | 1000.0km range
+  Drone 3: 12.0kg capacity | 692.3km range
+
+Environmental Factors:
+  Weather Zones: 3
+  Obstacles: 5
+
+======================================================
+OPTIMAL ROUTE DETAILS
+======================================================
+Assigned Drone: #2 (40.0 km/h | 120.0 kWh battery)
+
+Route Sequence:
+┌───────┬─────────────┬─────────────┬──────────────┬────────────┐
+│ Step  │ Location ID │ Coordinates │  Time Window │   Type     │
+├───────┼─────────────┼─────────────┼──────────────┼────────────┤
+│     1 │           1 │ ( 10.00, 10.00) │ 10.0 - 50.0 │ customer   │
+│     2 │           5 │ (  3.00, 12.00) │ 40.0 - 90.0 │ customer   │
+│     3 │           0 │ (  0.00,  0.00) │  0.0 - 100.0 │ depot      │
+│     4 │           9 │ (  5.00, 18.00) │ 15.0 - 65.0 │ customer   │
+│     5 │           7 │ (  8.00, 20.00) │ 25.0 - 70.0 │ customer   │
+│     6 │           4 │ (  7.00, 15.00) │ 30.0 - 80.0 │ customer   │
+│     7 │           8 │ ( 18.00, 15.00) │ 35.0 - 75.0 │ customer   │
+│     8 │           3 │ ( 15.00,  8.00) │ 20.0 - 60.0 │ customer   │
+│     9 │           6 │ ( 12.00,  3.00) │  0.0 - 100.0 │ charging_station │
+│    10 │           2 │ (  5.00,  5.00) │  0.0 - 100.0 │ charging_station │
+└───────┴─────────────┴─────────────┴──────────────┴────────────┘
+
+======================================================
+PERFORMANCE METRICS
+======================================================
+Total Distance: 1148.25 km
+Total Cost: $4114.83
+Total Travel Time: 63.43 hours
+
+Battery Usage Analysis:
+  Recharging Events: 0
+  Total Recharging Cost: $4114.83
+
+Constraint Compliance:
+  Time Window Violations: 0
+  Capacity Violations: 4

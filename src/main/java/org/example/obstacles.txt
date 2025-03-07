@@ -1,1 +1,0 @@
-# centerX,centerY,radius,penalty

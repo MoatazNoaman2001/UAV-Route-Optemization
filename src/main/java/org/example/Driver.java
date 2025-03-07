@@ -1,11 +1,15 @@
 package org.example;
 
+import org.example.models.Drone;
+import org.example.models.Location;
+import org.example.models.Obstacle;
+import org.example.models.WeatherZone;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.text.DecimalFormat;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class Driver {
     private static final DecimalFormat df = new DecimalFormat("0.00");
@@ -19,21 +23,21 @@ public class Driver {
 
         // Read input from file
         try {
-//            weatherZones = generateWeatherZones(10); // 10 weather zones
-//            obstacles = generateObstacles(20);
-//            saveWeatherZonesToFile(weatherZones, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\weather_zone.txt");
-//            saveObstaclesToFile(obstacles, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\obstacles.txt");
 
             locations = loadLocations();
             drones = loadDrones();
-//            weatherZones = loadWeatherZones();
-//            obstacles = loadObstacles();
+            weatherZones = generateWeatherZonesBasedOnLocations(locations, 3); // 10 weather zones
+            obstacles = generateObstaclesBasedOnLocations(locations, 5);
+            saveWeatherZonesToFile(weatherZones, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\weather_zone.txt");
+            saveObstaclesToFile(obstacles, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\obstacles.txt");
+
+
             printInputSummary(locations, drones, weatherZones, obstacles);
             Algorithm algorithm = new Algorithm(drones, locations,weatherZones,obstacles, 1000, 0.005, 1.0);
             Route optimalRoute = algorithm.findOptimalRoute();
             printRouteDetails(optimalRoute);
             printPerformanceMetrics(optimalRoute);
-            printVisualization(locations, weatherZones, obstacles);
+            printVisualization(locations, weatherZones, obstacles, optimalRoute);
         } catch (FileNotFoundException e) {
             System.out.println("Input file not found!");
             e.printStackTrace();
@@ -74,7 +78,7 @@ public class Driver {
     }
     private static List<Location> loadLocations() throws FileNotFoundException {
         List<Location> locations= new ArrayList<>();
-        File locations_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\locations.txt");
+        File locations_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\locations.txt");
         Scanner scanner = new Scanner(locations_file);
 
         // Read locations
@@ -102,7 +106,7 @@ public class Driver {
     }
     private static List<Drone> loadDrones() throws FileNotFoundException {
         List<Drone> drones = new ArrayList<>();
-        File drons_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\drones.txt");
+        File drons_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\drones.txt");
         Scanner drons_scanner = new Scanner(drons_file);
 
         // Read drones
@@ -127,37 +131,43 @@ public class Driver {
         }
         return  drones;
     }
-//
-//    private static List<Obstacle> generateObstacles(int count) {
-//        List<Obstacle> obstacles = new ArrayList<>();
-//        Random random = new Random();
-//
-//        for (int i = 0; i < count; i++) {
-//            double cx = random.nextDouble() * 100; // X coordinate (0-100)
-//            double cy = random.nextDouble() * 100; // Y coordinate (0-100)
-//            double radius = 2 + random.nextDouble() * 3; // Radius between 2 and 5
-//            double penalty = 50 + random.nextDouble() * 150; // Penalty between 50 and 200
-//
-//            obstacles.add(new Obstacle(cx, cy, radius, penalty));
-//        }
-//        return obstacles;
-//    }
-//    private static List<WeatherZone> generateWeatherZones(int count) {
-//        List<WeatherZone> zones = new ArrayList<>();
-//        Random random = new Random();
-//
-//        for (int i = 0; i < count; i++) {
-//            double xMin = random.nextDouble() * 80; // X min (0-80)
-//            double xMax = xMin + 10 + random.nextDouble() * 10; // X max (10-20 width)
-//            double yMin = random.nextDouble() * 80; // Y min (0-80)
-//            double yMax = yMin + 10 + random.nextDouble() * 10; // Y max (10-20 height)
-//            double windSpeed = 10 + random.nextDouble() * 30; // Wind speed (10-40 km/h)
-//            double windAngle = random.nextDouble() * 360; // Wind angle (0-360 degrees)
-//
-//            zones.add(new WeatherZone(xMin, xMax, yMin, yMax, windSpeed, windAngle));
-//        }
-//        return zones;
-//    }
+
+    private static List<WeatherZone> generateWeatherZonesBasedOnLocations(List<Location> locations, int count) {
+        List<WeatherZone> zones = new ArrayList<>();
+        Random random = new Random();
+
+        for (int i = 0; i < count; i++) {
+            // Select a random location as the center point for the weather zone
+            Location location = locations.get(random.nextInt(locations.size()));
+            double xMin = Math.max(0, location.getX() - 5 + random.nextDouble() * 10);
+            double xMax = xMin + 5 + random.nextDouble() * 5;
+            double yMin = Math.max(0, location.getY() - 5 + random.nextDouble() * 10);
+            double yMax = yMin + 5 + random.nextDouble() * 5;
+            double windSpeed = 10 + random.nextDouble() * 30;
+            double windAngle = random.nextDouble() * 360;
+
+            zones.add(new WeatherZone(xMin, xMax, yMin, yMax, windSpeed, windAngle));
+        }
+        return zones;
+    }
+
+    private static List<Obstacle> generateObstaclesBasedOnLocations(List<Location> locations, int count) {
+        List<Obstacle> obstacles = new ArrayList<>();
+        Random random = new Random();
+
+        for (int i = 0; i < count; i++) {
+            // Select a random location to place the obstacle nearby
+            Location location = locations.get(random.nextInt(locations.size()));
+            double cx = location.getX() + (random.nextDouble() * 10 - 5); // Within 5 units radius
+            double cy = location.getY() + (random.nextDouble() * 10 - 5);
+            double radius = 2 + random.nextDouble() * 3; // Radius between 2 and 5
+            double penalty = 50 + random.nextDouble() * 150; // Penalty between 50 and 200
+
+            obstacles.add(new Obstacle(cx, cy, radius, penalty));
+        }
+        return obstacles;
+    }
+
     private static List<WeatherZone> loadWeatherZones() throws FileNotFoundException {
         List<WeatherZone> zones = new ArrayList<>();
         File weatherFile = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\weather_zone.txt");
@@ -277,77 +287,138 @@ public class Driver {
         return route.getCapacityViolations();
     }
 
-    private static void printVisualization(List<Location> locations, List<WeatherZone> weatherZones, List<Obstacle> obstacles) {
+    private static void printVisualization(List<Location> locations,
+                                           List<WeatherZone> weatherZones,
+                                           List<Obstacle> obstacles,
+                                           Route route) {
         System.out.println("\n" + BORDER);
-        System.out.println("ROUTE VISUALIZATION");
+        System.out.println("ENHANCED ROUTE VISUALIZATION");
         System.out.println(BORDER);
 
         // ASCII map dimensions
-        final int MAP_WIDTH = 50;
-        final int MAP_HEIGHT = 20;
+        final int MAP_WIDTH = 80;
+        final int MAP_HEIGHT = 30;
+        final double CELL_SIZE = 2.0; // km per character
 
-        // Find coordinate bounds
-        double minX = locations.stream().mapToDouble(Location::getX).min().orElse(0);
-        double maxX = locations.stream().mapToDouble(Location::getX).max().orElse(1);
-        double minY = locations.stream().mapToDouble(Location::getY).min().orElse(0);
-        double maxY = locations.stream().mapToDouble(Location::getY).max().orElse(1);
+        // Find coordinate bounds with padding
+        double minX = locations.stream().mapToDouble(Location::getX).min().orElse(0) - 5;
+        double maxX = locations.stream().mapToDouble(Location::getX).max().orElse(1) + 5;
+        double minY = locations.stream().mapToDouble(Location::getY).min().orElse(0) - 5;
+        double maxY = locations.stream().mapToDouble(Location::getY).max().orElse(1) + 5;
+
+        // Calculate scaling factors
+        double xScale = (maxX - minX) / MAP_WIDTH;
+        double yScale = (maxY - minY) / MAP_HEIGHT;
 
         // Legend
-        System.out.println("Legend: [D] Depot [C] Customer [⚡] Charging Station [W] Weather Zone [O] Obstacle\n");
+        System.out.println("Legend: [D] Depot [C] Customer [⚡] Charging Station");
+        System.out.println("        [W] Weather Zone [O] Obstacle [*] Route Path\n");
 
-        // Draw the map
-        for (int row = 0; row < MAP_HEIGHT; row++) {
-            StringBuilder line = new StringBuilder();
-            for (int col = 0; col < MAP_WIDTH; col++) {
-                double x = minX + (maxX - minX) * col / MAP_WIDTH;
-                double y = maxY - (maxY - minY) * row / MAP_HEIGHT;
+        // Create grid
+        char[][] grid = new char[MAP_HEIGHT][MAP_WIDTH];
+        for (char[] row : grid) Arrays.fill(row, '.');
 
-                // Check for weather zones
-                boolean inWeatherZone = false;
-                for (WeatherZone zone : weatherZones) {
-                    if (x >= zone.getXMin() && x <= zone.getXMax() &&
-                            y >= zone.getYMin() && y <= zone.getYMax()) {
-                        inWeatherZone = true;
-                        break;
+        // Draw weather zones
+        for (WeatherZone zone : weatherZones) {
+            int startX = (int) ((zone.getXMin() - minX) / xScale);
+            int endX = (int) ((zone.getXMax() - minX) / xScale);
+            int startY = (int) ((maxY - zone.getYMax()) / yScale);
+            int endY = (int) ((maxY - zone.getYMin()) / yScale);
+
+            for (int y = startY; y < endY; y++) {
+                for (int x = startX; x < endX; x++) {
+                    if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+                        grid[y][x] = 'W';
                     }
                 }
-
-                // Check for obstacles
-                boolean inObstacle = false;
-                for (Obstacle obstacle : obstacles) {
-                    if (distance(x, obstacle.getCenterX(), y, obstacle.getCenterY()) <= obstacle.getRadius()) {
-                        inObstacle = true;
-                        break;
-                    }
-                }
-
-                // Check for locations
-                String symbol = " ";
-                for (Location loc : locations) {
-                    if (distance(loc.getX(), x, loc.getY(), y) < 0.05 * (maxX - minX)) {
-                        symbol = getLocationSymbol(loc);
-                        break;
-                    }
-                }
-
-                // Override symbol if in weather zone or obstacle
-                if (inObstacle) {
-                    symbol = "O";
-                } else if (inWeatherZone) {
-                    symbol = "W";
-                }
-
-                line.append(symbol);
             }
-            System.out.println(line);
+        }
+
+        // Draw obstacles
+        for (Obstacle obs : obstacles) {
+            int centerX = (int) ((obs.getCenterX() - minX) / xScale);
+            int centerY = (int) ((maxY - obs.getCenterY()) / yScale);
+            int radius = (int) (obs.getRadius() / (CELL_SIZE * xScale));
+
+            for (int y = centerY - radius; y <= centerY + radius; y++) {
+                for (int x = centerX - radius; x <= centerX + radius; x++) {
+                    if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+                        double dx = (x - centerX) * xScale;
+                        double dy = (y - centerY) * yScale;
+                        if (Math.sqrt(dx*dx + dy*dy) <= obs.getRadius()) {
+                            grid[y][x] = 'O';
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw route path
+        List<Location> path = route.getLocations();
+        Location prev = path.get(0);
+        for (Location loc : path) {
+            int x = (int) ((loc.getX() - minX) / xScale);
+            int y = (int) ((maxY - loc.getY()) / yScale);
+            if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+                grid[y][x] = '*';
+
+                // Draw line between consecutive locations
+                int prevX = (int) ((prev.getX() - minX) / xScale);
+                int prevY = (int) ((maxY - prev.getY()) / yScale);
+                drawLine(grid, prevX, prevY, x, y);
+
+                prev = loc;
+            }
+        }
+
+        // Draw locations on top
+        for (Location loc : locations) {
+            int x = (int) ((loc.getX() - minX) / xScale);
+            int y = (int) ((maxY - loc.getY()) / yScale);
+            if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+                grid[y][x] = getLocationSymbol(loc);
+            }
+        }
+
+        // Print the grid
+        for (char[] row : grid) {
+            System.out.println(new String(row)
+                    .replace("W", "\u001B[34mW\u001B[0m")  // Blue weather zones
+                    .replace("O", "\u001B[31mO\u001B[0m")  // Red obstacles
+                    .replace("*", "\u001B[32m*\u001B[0m"));// Green route path
         }
     }
 
-    private static String getLocationSymbol(Location loc) {
+    // Bresenham's line algorithm for drawing routes
+    private static void drawLine(char[][] grid, int x0, int y0, int x1, int y1) {
+        int dx = Math.abs(x1 - x0);
+        int dy = Math.abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+
+        while (true) {
+            if (x0 >= 0 && x0 < grid[0].length && y0 >= 0 && y0 < grid.length) {
+                if (grid[y0][x0] == '.') grid[y0][x0] = '*';
+            }
+
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                x0 += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y0 += sy;
+            }
+        }
+    }
+    private static char getLocationSymbol(Location loc) {
         return switch (loc.getType().toLowerCase()) {
-            case "depot" -> "D";
-            case "charging station" -> "⚡";
-            default -> "C";
+            case "depot" -> 'D';
+            case "charging station" -> '⚡';
+            default -> 'C';
         };
     }
 
