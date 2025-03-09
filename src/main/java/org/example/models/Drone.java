@@ -41,4 +41,20 @@ public class Drone {
     public void setBatteryLevel(double batteryLevel) {
         this.batteryLevel = batteryLevel;
     }
+
+    @Override
+    public String toString() {
+        return "Drone{" +
+                "id=" + id +
+                ", speed=" + speed +
+                ", maxBattery=" + maxBattery +
+                ", minBattery=" + minBattery +
+                ", batteryLevel=" + batteryLevel +
+                ", payloadCapacity=" + payloadCapacity +
+                ", baseEnergyConsumption=" + baseEnergyConsumption +
+                ", payloadEnergyCoefficient=" + payloadEnergyCoefficient +
+                ", rechargingTime=" + rechargingTime +
+                ", rechargingCost=" + rechargingCost +
+                '}';
+    }
 }

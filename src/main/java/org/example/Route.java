@@ -8,337 +8,303 @@ import org.example.models.WeatherZone;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Route class represents a path for a drone to follow, including cost calculations
+ */
 public class Route {
     private Drone drone;
     private List<Location> locations;
-    private double totalDistance;
-    private double totalCost;
-    private double totalTravelTime;
-    private List<Location> rechargingStations;
     private List<WeatherZone> weatherZones;
     private List<Obstacle> obstacles;
-    private int timeWindowViolations;
-    private int capacityViolations;
+    private List<Location> rechargingStations;
 
-//    public Route(Drone drone, List<Location> locations) {
-//        this.drone = drone;
-//        this.locations = new ArrayList<>(locations);
-//        this.rechargingStations = new ArrayList<>();
-//        this.weatherZones = new ArrayList<>();
-//        this.obstacles = new ArrayList<>();
-//
-//        // Extract recharging stations from locations
-//        for (Location location : locations) {
-//            if (location.getType().equalsIgnoreCase("charging station")) {
-//                rechargingStations.add(location);
-//            }
-//        }
-//
-//        calculateTotalDistanceAndCost();
-//    }
+    // Cache for computed values to improve performance
+    private double totalDistance = -1;
+    private double totalTravelTime = -1;
+    private double totalCost = -1;
+    private double totalDemand = -1;
+    private int timeWindowViolations = -1;
+    private int capacityViolations = -1;
+    private List<Location> usedRechargingStations = new ArrayList<>();
 
-    public Route(Drone drone, List<Location> locations, List<WeatherZone> weatherZones, List<Obstacle> obstacles) {
+    /**
+     * Constructor with all parameters
+     */
+    public Route(Drone drone, List<Location> locations, List<WeatherZone> weatherZones,
+                 List<Obstacle> obstacles, List<Location> rechargingStations) {
         this.drone = drone;
         this.locations = new ArrayList<>(locations);
         this.weatherZones = weatherZones;
         this.obstacles = obstacles;
-        this.rechargingStations = new ArrayList<>();
-
-        // Extract recharging stations from locations
-        for (Location location : locations) {
-            if (location.getType().equalsIgnoreCase("charging station")) {
-                rechargingStations.add(location);
-            }
-        }
-
-        calculateTotalDistanceAndCost();
+        this.rechargingStations = rechargingStations;
     }
 
-
-    private void calculateTotalDistanceAndCost() {
-        if (locations.isEmpty()) {
-            return;
+    /**
+     * Calculate total distance of the route including penalties for obstacles and weather
+     */
+    public double getTotalDistance() {
+        if (totalDistance >= 0) {
+            return totalDistance;
         }
 
-        timeWindowViolations = 0;
-        capacityViolations = 0;
         totalDistance = 0;
-        totalCost = 0;
-        totalTravelTime = 0;
 
-        Location depot = getDepot();
-        Location currentLocation = depot;
-        double batteryLevel = drone.getMaxBattery();
-        double remainingCapacity = drone.getPayloadCapacity();
+        for (int i = 0; i < locations.size() - 1; i++) {
+            Location current = locations.get(i);
+            Location next = locations.get(i + 1);
+
+            // Basic distance
+            double distance = calculateDistance(current, next);
+
+            // Add obstacle penalties
+            for (Obstacle obstacle : obstacles) {
+                if (intersectsObstacle(current, next, obstacle)) {
+                    distance += obstacle.getPenalty();
+                }
+            }
+
+            // Add weather zone penalties
+            for (WeatherZone zone : weatherZones) {
+                if (intersectsWeatherZone(current, next, zone)) {
+                    distance += calculateWeatherPenalty(current, next, zone);
+                }
+            }
+
+            totalDistance += distance;
+        }
+
+        return totalDistance;
+    }
+
+    /**
+     * Calculate total travel time including waiting and service times
+     */
+    public double getTotalTravelTime() {
+        if (totalTravelTime >= 0) {
+            return totalTravelTime;
+        }
+
+        totalTravelTime = 0;
         double currentTime = 0;
 
-        // Create a proper route sequence that always starts and ends with depot
-        List<Location> routeSequence = new ArrayList<>();
-        routeSequence.add(depot); // Always start at depot
+        // Reset time window violations count
+        timeWindowViolations = 0;
 
-        // Add all non-depot locations from original sequence
-        for (Location loc : locations) {
-            if (!loc.equals(depot)) {
-                routeSequence.add(loc);
-            }
-        }
+        for (int i = 0; i < locations.size() - 1; i++) {
+            Location current = locations.get(i);
+            Location next = locations.get(i + 1);
 
-        if (!routeSequence.getLast().equals(depot)) {
-            routeSequence.add(depot); // Always end at depot
-        }
+            // Calculate travel time based on distance and drone speed
+            double distance = calculateDistance(current, next);
+            double travelTime = distance / drone.getSpeed();
 
-        // Now process the route
-        for (int i = 1; i < routeSequence.size(); i++) {
-            Location nextLocation = routeSequence.get(i);
-
-            // Calculate distance between current and next location
-            double distanceToNext = calculateDistance(currentLocation, nextLocation);
-
-            // Check for intersections with weather zones and obstacles
-            distanceToNext += calculateWeatherPenalty(currentLocation, nextLocation);
-            distanceToNext += calculateObstaclePenalty(currentLocation, nextLocation);
-
-            // Update total distance
-            totalDistance += distanceToNext;
-
-            // Calculate energy required for this leg
-            double energyRequired = calculateEnergyRequirement(distanceToNext,
-                    nextLocation.getDemand());
-
-            // Check if we need to recharge
-            if (batteryLevel - energyRequired < drone.getMinBattery()) {
-                Location nearestStation = findNearestRechargeStation(currentLocation);
-                if (nearestStation != null && !nearestStation.equals(currentLocation)) {
-                    // Calculate distance to station
-                    double distanceToStation = calculateDistance(currentLocation, nearestStation);
-                    double energyToStation = calculateEnergyRequirement(distanceToStation, 0);
-
-                    // Calculate distance from station to next location
-                    double distanceFromStation = calculateDistance(nearestStation, nextLocation);
-                    double energyFromStation = calculateEnergyRequirement(distanceFromStation,
-                            nextLocation.getDemand());
-
-                    // Update total distance (adding detour)
-                    totalDistance += distanceToStation + distanceFromStation - distanceToNext;
-
-                    // Update battery level after reaching station
-                    batteryLevel -= energyToStation;
-
-                    // Recharge
-                    batteryLevel = drone.getMaxBattery();
-                    totalCost += drone.getRechargingCost();
-
-                    // Add recharging time
-                    double rechargingTime = drone.getRechargingTime() / 60.0; // Convert to hours
-                    totalTravelTime += rechargingTime;
-                    currentTime += rechargingTime;
-
-                    // Continue to destination
-                    batteryLevel -= energyFromStation;
-                } else {
-                    // No station available, we'll just continue and deplete the battery
-                    batteryLevel -= energyRequired;
-                }
-            } else {
-                // We have enough battery, just continue
-                batteryLevel -= energyRequired;
-            }
-
-            // Update capacity
-            if (nextLocation.getDemand() > 0) {
-                if (remainingCapacity < nextLocation.getDemand()) {
-                    capacityViolations++;
-                    totalCost += 1000; // Penalty
-                }
-                remainingCapacity -= nextLocation.getDemand();
-            }
-
-            // Calculate travel time in hours (distance / speed)
-            double travelTime = distanceToNext / drone.getSpeed();
-            totalTravelTime += travelTime;
+            // Add travel time
             currentTime += travelTime;
+            totalTravelTime += travelTime;
 
-            // Check time window constraints
-            double[] timeWindow = nextLocation.getTimeWindow();
-            if (currentTime < timeWindow[0]) {
-                // We arrived too early, wait until time window opens
-                double waitingTime = timeWindow[0] - currentTime;
-                currentTime = timeWindow[0];
-                totalTravelTime += waitingTime;
-            } else if (currentTime > timeWindow[1]) {
-                // We arrived too late, add a penalty
-                totalCost += 500; // Late arrival penalty
-                timeWindowViolations++;
+            // Check time windows for next location
+            if (!next.getType().equalsIgnoreCase("depot") && !next.getType().equalsIgnoreCase("charging_station")) {
+                double[] timeWindow = next.getTimeWindow();
+
+                // If too early, wait
+                if (currentTime < timeWindow[0]) {
+                    double waitTime = timeWindow[0] - currentTime;
+                    currentTime = timeWindow[0];
+                    totalTravelTime += waitTime;
+                }
+
+                // If too late, add violation
+                if (currentTime > timeWindow[1]) {
+                    timeWindowViolations++;
+                    totalTravelTime += (currentTime - timeWindow[1]) * 2; // Penalty for being late
+                }
+
+                // Add service time
+                currentTime += next.getServiceTime();
+                totalTravelTime += next.getServiceTime();
             }
 
-            // Add service time (convert from minutes to hours)
-            double serviceTimeHours = nextLocation.getServiceTime() / 60.0;
-            currentTime += serviceTimeHours;
-            totalTravelTime += serviceTimeHours;
-
-            // Update current location
-            currentLocation = nextLocation;
-        }
-
-        // Calculate the total cost based on distance and other factors
-        totalCost += totalDistance * 0.1; // Basic cost per distance
-    }
-    private double calculateEnergyRequirement(double distance, double payload) {
-        return distance * (drone.getBaseEnergyConsumption() + payload * drone.getPayloadEnergyCoefficient());
-    }
-
-    private Location findNearestRechargeStation(Location currentLocation) {
-        if (rechargingStations.isEmpty()) {
-            return null;
-        }
-
-        Location nearest = null;
-        double minDistance = Double.MAX_VALUE;
-
-        for (Location station : rechargingStations) {
-            double distance = calculateDistance(currentLocation, station);
-            if (distance < minDistance) {
-                minDistance = distance;
-                nearest = station;
+            // If current is a charging station, add recharging time
+            if (current.getType().equalsIgnoreCase("charging_station")) {
+                totalTravelTime += drone.getRechargingTime();
+                usedRechargingStations.add(current);
             }
         }
 
-        return nearest;
+        return totalTravelTime;
     }
 
-    private double calculateWeatherPenalty(Location from, Location to) {
-        double penalty = 0;
+    /**
+     * Calculate total cost of the route, combining distance, time, and recharging costs
+     */
+    public double getTotalCost() {
+        if (totalCost >= 0) {
+            return totalCost;
+        }
 
-        for (WeatherZone zone : weatherZones) {
-            if (doesIntersectWeatherZone(from, to, zone)) {
-                // Apply penalty based on the weather zone's parameters
-                double baseDistance = calculateDistance(from, to);
-                penalty += baseDistance * (1 + 0.1 * (zone.getWindSpeed() / drone.getSpeed())
-                        * Math.cos(Math.toRadians(zone.getWindAngle())));
+        // Recompute cached values if needed
+        double distance = getTotalDistance();
+        double travelTime = getTotalTravelTime();
+
+        // Calculate recharging costs
+        double rechargingCost = usedRechargingStations.size() * drone.getRechargingCost();
+
+        // Calculate time window violation penalties
+        double timeWindowPenalty = getTimeWindowViolations() * 500;
+
+        // Calculate capacity violation penalties
+        double capacityPenalty = getCapacityViolations() * 1000;
+
+        // Combine all costs
+        totalCost = distance + travelTime + rechargingCost + timeWindowPenalty + capacityPenalty;
+
+        return totalCost;
+    }
+
+    /**
+     * Get total demand for this route
+     */
+    public double getTotalDemand() {
+        if (totalDemand >= 0) {
+            return totalDemand;
+        }
+
+        totalDemand = 0;
+        capacityViolations = 0;
+
+        for (Location location : locations) {
+            if (!location.getType().equalsIgnoreCase("depot") &&
+                    !location.getType().equalsIgnoreCase("charging_station")) {
+                totalDemand += location.getDemand();
             }
         }
 
-        return penalty;
-    }
-
-    private boolean doesIntersectWeatherZone(Location from, Location to, WeatherZone zone) {
-        // Check if the line from->to intersects with the weather zone boundaries
-        double x1 = from.getX();
-        double y1 = from.getY();
-        double x2 = to.getX();
-        double y2 = to.getY();
-
-        double xMin = zone.getXMin();
-        double xMax = zone.getXMax();
-        double yMin = zone.getYMin();
-        double yMax = zone.getYMax();
-
-        // Check if the line intersects with any of the four boundaries
-        return lineIntersectsRectangle(x1, y1, x2, y2, xMin, yMin, xMax, yMax);
-    }
-
-    private boolean lineIntersectsRectangle(double x1, double y1, double x2, double y2,
-                                            double xMin, double yMin, double xMax, double yMax) {
-        // Check if line intersects with any of the four sides of the rectangle
-        return (lineIntersect(x1, y1, x2, y2, xMin, yMin, xMax, yMin) ||  // Bottom edge
-                lineIntersect(x1, y1, x2, y2, xMin, yMax, xMax, yMax) ||  // Top edge
-                lineIntersect(x1, y1, x2, y2, xMin, yMin, xMin, yMax) ||  // Left edge
-                lineIntersect(x1, y1, x2, y2, xMax, yMin, xMax, yMax));   // Right edge
-    }
-
-    private boolean lineIntersect(double x1, double y1, double x2, double y2,
-                                  double x3, double y3, double x4, double y4) {
-        // Calculate the direction vectors
-        double dx1 = x2 - x1;
-        double dy1 = y2 - y1;
-        double dx2 = x4 - x3;
-        double dy2 = y4 - y3;
-
-        // Calculate the determinant
-        double det = dx1 * dy2 - dy1 * dx2;
-
-        // If det is zero, the lines are parallel
-        if (Math.abs(det) < 1e-10) {
-            return false;
+        // Check for capacity violations
+        if (totalDemand > drone.getPayloadCapacity()) {
+            capacityViolations = 1;
         }
 
-        // Calculate the parameters for the intersection point
-        double t1 = ((x3 - x1) * dy2 - (y3 - y1) * dx2) / det;
-        double t2 = ((x3 - x1) * dy1 - (y3 - y1) * dx1) / det;
-
-        // Check if the intersection point lies on both line segments
-        return (t1 >= 0 && t1 <= 1 && t2 >= 0 && t2 <= 1);
+        return totalDemand;
     }
 
-    private double calculateObstaclePenalty(Location from, Location to) {
-        double penalty = 0;
-
-        for (Obstacle obstacle : obstacles) {
-            if (doesIntersectObstacle(from, to, obstacle)) {
-                penalty += obstacle.getPenalty();
-            }
+    /**
+     * Get number of time window violations in this route
+     */
+    public int getTimeWindowViolations() {
+        if (timeWindowViolations < 0) {
+            // Force recalculation
+            getTotalTravelTime();
         }
-
-        return penalty;
+        return timeWindowViolations;
     }
 
-    private boolean doesIntersectObstacle(Location from, Location to, Obstacle obstacle) {
-        // Extract parameters from the obstacle
+    /**
+     * Get number of capacity violations in this route
+     */
+    public int getCapacityViolations() {
+        if (capacityViolations < 0) {
+            // Force recalculation
+            getTotalDemand();
+        }
+        return capacityViolations;
+    }
+
+    /**
+     * Get recharging stations used in this route
+     */
+    public List<Location> getRechargingStations() {
+        if (totalTravelTime < 0) {
+            // Force recalculation
+            getTotalTravelTime();
+        }
+        return usedRechargingStations;
+    }
+
+    /**
+     * Calculate Euclidean distance between two locations
+     */
+    private double calculateDistance(Location a, Location b) {
+        double dx = a.getX() - b.getX();
+        double dy = a.getY() - b.getY();
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /**
+     * Check if edge intersects with an obstacle
+     * Implements Algorithm 4 from the project documentation
+     */
+    private boolean intersectsObstacle(Location a, Location b, Obstacle obstacle) {
         double cx = obstacle.getCenterX();
         double cy = obstacle.getCenterY();
         double r = obstacle.getRadius();
 
-        // Line parameters
-        double x1 = from.getX();
-        double y1 = from.getY();
-        double x2 = to.getX();
-        double y2 = to.getY();
+        // Edge line parameters
+        double dx = b.getX() - a.getX();
+        double dy = b.getY() - a.getY();
 
-        // Vector from line start to circle center
-        double dx = x2 - x1;
-        double dy = y2 - y1;
-        double fx = x1 - cx;
-        double fy = y1 - cy;
+        // Calculate coefficients
+        double fx = a.getX() - cx;
+        double fy = a.getY() - cy;
 
-        // Quadratic equation coefficients
-        double a = dx * dx + dy * dy;
-        double b = 2 * (fx * dx + fy * dy);
-        double c = (fx * fx + fy * fy) - r * r;
+        double a_coef = dx * dx + dy * dy;
+        double b_coef = 2 * (fx * dx + fy * dy);
+        double c_coef = (fx * fx + fy * fy) - r * r;
 
-        // Calculate the discriminant
-        double discriminant = b * b - 4 * a * c;
+        // Calculate discriminant
+        double discriminant = b_coef * b_coef - 4 * a_coef * c_coef;
 
-        // Check if the line intersects the circle
-        if (discriminant >= 0) {
-            // Calculate the parameters for the intersection points
-            double t1 = (-b + Math.sqrt(discriminant)) / (2 * a);
-            double t2 = (-b - Math.sqrt(discriminant)) / (2 * a);
-
-            // Check if at least one intersection point lies on the line segment
-            return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1);
-        }
-
-        return false;
+        // Check if there's an intersection
+        return discriminant >= 0;
     }
 
-    private double calculateDistance(Location from, Location to) {
-        double dx = to.getX() - from.getX();
-        double dy = to.getY() - from.getY();
-        return Math.sqrt(dx * dx + dy * dy);
-    }
+    /**
+     * Check if edge intersects with a weather zone
+     * Implements Algorithm 2 from the project documentation
+     */
+    private boolean intersectsWeatherZone(Location a, Location b, WeatherZone zone) {
+        // Get bounds
+        double x1 = zone.getXMin();
+        double x2 = zone.getXMax();
+        double y1 = zone.getYMin();
+        double y2 = zone.getYMax();
 
-    private Location getDepot() {
-        for (Location location : locations) {
-            if (location.getType().equalsIgnoreCase("depot")) {
-                return location;
-            }
+        // Check if edge is completely outside the zone
+        double minX = Math.min(a.getX(), b.getX());
+        double maxX = Math.max(a.getX(), b.getX());
+        double minY = Math.min(a.getY(), b.getY());
+        double maxY = Math.max(a.getY(), b.getY());
+
+        if (maxX < x1 || minX > x2 || maxY < y1 || minY > y2) {
+            return false; // Completely outside
         }
 
-        // If no depot is found, return the first location (should not happen in a valid dataset)
-        return locations.getFirst();
+        // Check if edge is completely inside the zone
+        if (minX >= x1 && maxX <= x2 && minY >= y1 && maxY <= y2) {
+            return true; // Completely inside
+        }
+
+        // Check for intersection with zone boundaries
+        // This is a simplification that assumes edge cuts zone boundary somewhere
+        return true;
+    }
+
+    /**
+     * Calculate weather penalty for an edge
+     * Implements formula from Algorithm 2
+     */
+    private double calculateWeatherPenalty(Location a, Location b, WeatherZone zone) {
+        double baseDistance = calculateDistance(a, b);
+        double windSpeed = zone.getWindSpeed();
+        double windAngle = zone.getWindAngle();
+        double droneSpeed = drone.getSpeed();
+
+        // Calculate penalty based on the formula in Algorithm 2
+        return baseDistance * (1 + 0.1 * (windSpeed / droneSpeed) *
+                Math.cos(Math.toRadians(windAngle)));
     }
 
     // Getters and setters
+
     public Drone getDrone() {
         return drone;
     }
@@ -347,46 +313,37 @@ public class Route {
         return locations;
     }
 
-    public double getTotalDistance() {
-        return totalDistance;
-    }
+    public void setLocations(List<Location> locations) {
+        this.locations = new ArrayList<>(locations);
 
-    public double getTotalCost() {
-        return totalCost;
-    }
-
-    public double getTotalTravelTime() {
-        return totalTravelTime;
-    }
-
-    public List<Location> getRechargingStations() {
-        return rechargingStations;
-    }
-    public int getTimeWindowViolations() { return timeWindowViolations; }
-    public int getCapacityViolations() { return capacityViolations; }
-
-
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        Route route = (Route) o;
-
-        if (drone.getId() != route.drone.getId()) return false;
-        if (locations.size() != route.locations.size()) return false;
-
-        // Check if locations are the same (ignoring order)
-        return new ArrayList<>(locations).containsAll(route.locations);
+        // Reset cached values
+        totalDistance = -1;
+        totalTravelTime = -1;
+        totalCost = -1;
+        totalDemand = -1;
+        timeWindowViolations = -1;
+        capacityViolations = -1;
+        usedRechargingStations.clear();
     }
 
     @Override
-    public int hashCode() {
-        int result = drone.getId().hashCode();
-        for (Location location : locations) {
-            result = 31 * result + location.getId();
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Route{drone=").append(drone.getId()).append(", locations=[");
+
+        for (Location loc : locations) {
+            sb.append(loc.getId()).append("(").append(loc.getType()).append("), ");
         }
-        return result;
+
+        if (!locations.isEmpty()) {
+            sb.setLength(sb.length() - 2); // Remove trailing comma and space
+        }
+
+        sb.append("], cost=").append(getTotalCost())
+                .append(", distance=").append(getTotalDistance())
+                .append(", demand=").append(getTotalDemand())
+                .append("}");
+
+        return sb.toString();
     }
 }

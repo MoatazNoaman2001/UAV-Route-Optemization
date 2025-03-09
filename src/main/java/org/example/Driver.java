@@ -7,89 +7,57 @@ import org.example.models.WeatherZone;
 
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.PrintWriter;
-import java.text.DecimalFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
+
+import static org.example.MapVisualization.printRouteMap;
 
 public class Driver {
-    private static final DecimalFormat df = new DecimalFormat("0.00");
-    private static final String BORDER = "======================================================";
-
+    static List<WeatherZone> weatherZones = new ArrayList<>();
+    static List<Obstacle> obstacles = new ArrayList<>();
     public static void main(String[] args) {
-        List<Location> locations = new ArrayList<>();
-        List<Drone> drones = new ArrayList<>();
-        List<WeatherZone> weatherZones = new ArrayList<>();
-        List<Obstacle> obstacles = new ArrayList<>();
-
-        // Read input from file
         try {
-
-            locations = loadLocations();
-            drones = loadDrones();
-            weatherZones = generateWeatherZonesBasedOnLocations(locations, 3); // 10 weather zones
-            obstacles = generateObstaclesBasedOnLocations(locations, 5);
-            saveWeatherZonesToFile(weatherZones, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\weather_zone.txt");
-            saveObstaclesToFile(obstacles, "C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\obstacles.txt");
-
+            List<Location> locations = loadLocations("src/main/java/org/example/resource/locations.txt");
+            List<Drone> drones = loadDrones("src/main/java/org/example/resource/drones.txt");
+            weatherZones = loadWeatherZones("src/main/java/org/example/resource/weather_zone.txt");
+            obstacles = loadObstacles("src/main/java/org/example/resource/obstacles.txt");
 
             printInputSummary(locations, drones, weatherZones, obstacles);
-            Algorithm algorithm = new Algorithm(drones, locations,weatherZones,obstacles, 1000, 0.005, 1.0);
-            Route optimalRoute = algorithm.findOptimalRoute();
-            printRouteDetails(optimalRoute);
-            printPerformanceMetrics(optimalRoute);
-            printVisualization(locations, weatherZones, obstacles, optimalRoute);
+
+            System.out.println("\n==== Running Hybrid Algorithm ====\n");
+
+            HybridAlgorithm algorithm = new HybridAlgorithm(drones, locations, weatherZones, obstacles, 1000.0, 0.005, 1.0);
+            List<Route> optimalRoutes = algorithm.findOptimalRoutes();
+
+            System.out.println("\n==== Results ====\n");
+            System.out.println("Routes found: " + optimalRoutes.size());
+
+            double totalCost = 0.0;
+            for (int i = 0; i < optimalRoutes.size(); i++) {
+                Route route = optimalRoutes.get(i);
+                totalCost += route.getTotalCost();
+                System.out.println("\nRoute #" + (i+1) + " (Drone #" + route.getDrone().getId() + "):");
+                printRouteDetails(route);
+            }
+
+            System.out.println("\nTotal cost: " + totalCost);
+
         } catch (FileNotFoundException e) {
-            System.out.println("Input file not found!");
+            System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
         }
-
-//        // Create the algorithm and find the optimal route
-//        Algorithm algorithm = new Algorithm(drones, locations, 1000, 0.005, 1.0);
-//        Route optimalRoute = algorithm.findOptimalRoute();
-//
-//        // Output the results
-//        System.out.println("Optimal Route Cost: " + optimalRoute.getTotalCost());
-//        System.out.println("Optimal Route Distance: " + optimalRoute.getTotalDistance());
-//        System.out.println("Optimal Route: " + optimalRoute.getLocations());
     }
 
+    public static List<Location> loadLocations(String filename) throws FileNotFoundException {
+        List<Location> locations = new ArrayList<>();
+        Scanner scanner = new Scanner(new File(filename));
 
-    private static void saveWeatherZonesToFile(List<WeatherZone> zones, String filename) throws FileNotFoundException {
-        try (PrintWriter writer = new PrintWriter(filename)) {
-            writer.println("# xMin,xMax,yMin,yMax,windSpeed,windAngle");
-            for (WeatherZone zone : zones) {
-                writer.printf("%.1f,%.1f,%.1f,%.1f,%.1f,%.1f%n",
-                        zone.getXMin(), zone.getXMax(),
-                        zone.getYMin(), zone.getYMax(),
-                        zone.getWindSpeed(), zone.getWindAngle());
-            }
-        }
-    }
-
-    private static void saveObstaclesToFile(List<Obstacle> obstacles, String filename) throws FileNotFoundException {
-        try (PrintWriter writer = new PrintWriter(filename)) {
-            writer.println("# centerX,centerY,radius,penalty");
-            for (Obstacle obstacle : obstacles) {
-                writer.printf("%.1f,%.1f,%.1f,%.1f%n",
-                        obstacle.getCenterX(), obstacle.getCenterY(),
-                        obstacle.getRadius(), obstacle.getPenalty());
-            }
-        }
-    }
-    private static List<Location> loadLocations() throws FileNotFoundException {
-        List<Location> locations= new ArrayList<>();
-        File locations_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\locations.txt");
-        Scanner scanner = new Scanner(locations_file);
-
-        // Read locations
         while (scanner.hasNextLine()) {
             String line = scanner.nextLine();
-            if (line.startsWith("#") || line.isEmpty()) {
-                continue; // Skip comments and empty lines
-            }
+            if (line.startsWith("#") || line.isEmpty()) continue;
 
             String[] parts = line.split(",");
-            System.out.println(parts[0]);
             int id = Integer.parseInt(parts[0]);
             double x = Double.parseDouble(parts[1]);
             double y = Double.parseDouble(parts[2]);
@@ -101,20 +69,18 @@ public class Driver {
 
             locations.add(new Location(id, x, y, demand, new double[]{et, lt}, serviceTime, type));
         }
-        scanner.close();
-        return  locations;
-    }
-    private static List<Drone> loadDrones() throws FileNotFoundException {
-        List<Drone> drones = new ArrayList<>();
-        File drons_file = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\resource\\drones.txt");
-        Scanner drons_scanner = new Scanner(drons_file);
 
-        // Read drones
-        while (drons_scanner.hasNextLine()) {
-            String line = drons_scanner.nextLine();
-            if (line.startsWith("#") || line.isEmpty()) {
-                continue; // Skip comments and empty lines
-            }
+        scanner.close();
+        return locations;
+    }
+
+    public static List<Drone> loadDrones(String filename) throws FileNotFoundException {
+        List<Drone> drones = new ArrayList<>();
+        Scanner scanner = new Scanner(new File(filename));
+
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            if (line.startsWith("#") || line.isEmpty()) continue;
 
             String[] parts = line.split(",");
             int id = Integer.parseInt(parts[0]);
@@ -127,54 +93,21 @@ public class Driver {
             double rechargingTime = Double.parseDouble(parts[7]);
             double rechargingCost = Double.parseDouble(parts[8]);
 
-            drones.add(new Drone(id, speed, maxBattery, minBattery, payloadCapacity, baseEnergyConsumption, payloadEnergyCoefficient, rechargingTime, rechargingCost));
+            drones.add(new Drone(id, speed, maxBattery, minBattery, payloadCapacity,
+                    baseEnergyConsumption, payloadEnergyCoefficient,
+                    rechargingTime, rechargingCost));
         }
-        return  drones;
+
+        scanner.close();
+        return drones;
     }
 
-    private static List<WeatherZone> generateWeatherZonesBasedOnLocations(List<Location> locations, int count) {
+    public static List<WeatherZone> loadWeatherZones(String filename) throws FileNotFoundException {
         List<WeatherZone> zones = new ArrayList<>();
-        Random random = new Random();
-
-        for (int i = 0; i < count; i++) {
-            // Select a random location as the center point for the weather zone
-            Location location = locations.get(random.nextInt(locations.size()));
-            double xMin = Math.max(0, location.getX() - 5 + random.nextDouble() * 10);
-            double xMax = xMin + 5 + random.nextDouble() * 5;
-            double yMin = Math.max(0, location.getY() - 5 + random.nextDouble() * 10);
-            double yMax = yMin + 5 + random.nextDouble() * 5;
-            double windSpeed = 10 + random.nextDouble() * 30;
-            double windAngle = random.nextDouble() * 360;
-
-            zones.add(new WeatherZone(xMin, xMax, yMin, yMax, windSpeed, windAngle));
-        }
-        return zones;
-    }
-
-    private static List<Obstacle> generateObstaclesBasedOnLocations(List<Location> locations, int count) {
-        List<Obstacle> obstacles = new ArrayList<>();
-        Random random = new Random();
-
-        for (int i = 0; i < count; i++) {
-            // Select a random location to place the obstacle nearby
-            Location location = locations.get(random.nextInt(locations.size()));
-            double cx = location.getX() + (random.nextDouble() * 10 - 5); // Within 5 units radius
-            double cy = location.getY() + (random.nextDouble() * 10 - 5);
-            double radius = 2 + random.nextDouble() * 3; // Radius between 2 and 5
-            double penalty = 50 + random.nextDouble() * 150; // Penalty between 50 and 200
-
-            obstacles.add(new Obstacle(cx, cy, radius, penalty));
-        }
-        return obstacles;
-    }
-
-    private static List<WeatherZone> loadWeatherZones() throws FileNotFoundException {
-        List<WeatherZone> zones = new ArrayList<>();
-        File weatherFile = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\weather_zone.txt");
-        Scanner scanner = new Scanner(weatherFile);
+        Scanner scanner = new Scanner(new File(filename));
 
         while (scanner.hasNextLine()) {
-            String line = scanner.nextLine().trim();
+            String line = scanner.nextLine();
             if (line.startsWith("#") || line.isEmpty()) continue;
 
             String[] parts = line.split(",");
@@ -187,242 +120,117 @@ public class Driver {
 
             zones.add(new WeatherZone(xMin, xMax, yMin, yMax, windSpeed, windAngle));
         }
+
         scanner.close();
         return zones;
     }
 
-    private static List<Obstacle> loadObstacles() throws FileNotFoundException {
+    public static List<Obstacle> loadObstacles(String filename) throws FileNotFoundException {
         List<Obstacle> obstacles = new ArrayList<>();
-        File obstaclesFile = new File("C:\\Users\\moata\\Downloads\\aniza\\task2\\src\\main\\java\\org\\example\\obstacles.txt");
-        Scanner scanner = new Scanner(obstaclesFile);
+        Scanner scanner = new Scanner(new File(filename));
 
         while (scanner.hasNextLine()) {
-            String line = scanner.nextLine().trim();
+            String line = scanner.nextLine();
             if (line.startsWith("#") || line.isEmpty()) continue;
 
             String[] parts = line.split(",");
-            double cx = Double.parseDouble(parts[0]);
-            double cy = Double.parseDouble(parts[1]);
+            double centerX = Double.parseDouble(parts[0]);
+            double centerY = Double.parseDouble(parts[1]);
             double radius = Double.parseDouble(parts[2]);
             double penalty = Double.parseDouble(parts[3]);
 
-            obstacles.add(new Obstacle(cx, cy, radius, penalty));
+            obstacles.add(new Obstacle(centerX, centerY, radius, penalty));
         }
+
         scanner.close();
         return obstacles;
     }
 
     private static void printInputSummary(List<Location> locations, List<Drone> drones,
                                           List<WeatherZone> weatherZones, List<Obstacle> obstacles) {
-        System.out.println("\n" + BORDER);
-        System.out.println("INPUT SUMMARY");
-        System.out.println(BORDER);
+        System.out.println("=== Input Summary ===");
 
-        Map<String, Integer> locationTypes = new HashMap<>();
+        int depotCount = 0, customerCount = 0, stationCount = 0;
+
         for (Location loc : locations) {
-            locationTypes.merge(loc.getType().toLowerCase(), 1, Integer::sum);
+            if (loc.getType().equalsIgnoreCase("depot")) depotCount++;
+            else if (loc.getType().equalsIgnoreCase("charging_station")) stationCount++;
+            else customerCount++;
         }
 
-        System.out.println("Locations (" + locations.size() + "):");
-        locationTypes.forEach((type, count) ->
-                System.out.println("  " + type + ": " + count));
+        System.out.println("Locations: " + locations.size());
+        System.out.println("  - Depots: " + depotCount);
+        System.out.println("  - Customers: " + customerCount);
+        System.out.println("  - Charging Stations: " + stationCount);
 
-        System.out.println("\nDrones (" + drones.size() + "):");
-        drones.forEach(d -> System.out.printf("  Drone %d: %.1fkg capacity | %.1fkm range%n",
-                d.getId(), d.getPayloadCapacity(),
-                d.getMaxBattery()/d.getBaseEnergyConsumption()));
+        System.out.println("Drones: " + drones.size());
+        for (Drone drone : drones) {
+            System.out.printf("  - Drone #%d: Speed=%.1f, Capacity=%.1f, Battery=%.1f\n",
+                    drone.getId(), drone.getSpeed(), drone.getPayloadCapacity(), drone.getMaxBattery());
+        }
 
-        System.out.println("\nEnvironmental Factors:");
-        System.out.println("  Weather Zones: " + weatherZones.size());
-        System.out.println("  Obstacles: " + obstacles.size());
+        System.out.println("Weather Zones: " + weatherZones.size());
+        System.out.println("Obstacles: " + obstacles.size());
     }
 
     private static void printRouteDetails(Route route) {
-        System.out.println("\n" + BORDER);
-        System.out.println("OPTIMAL ROUTE DETAILS");
-        System.out.println(BORDER);
+        System.out.println("  - Locations: " + formatLocationSequence(route.getLocations()));
+        System.out.printf("  - Cost: %.2f\n", route.getTotalCost());
+        System.out.printf("  - Distance: %.2f\n", route.getTotalDistance());
+        System.out.printf("  - Time: %.2f\n", route.getTotalTravelTime());
+        System.out.printf("  - Payload: %.2f / %.2f\n", route.getTotalDemand(), route.getDrone().getPayloadCapacity());
 
-        Drone drone = route.getDrone();
-        System.out.printf("Assigned Drone: #%d (%.1f km/h | %.1f kWh battery)%n%n",
-                drone.getId(), drone.getSpeed(), drone.getMaxBattery());
+        if (route.getTimeWindowViolations() > 0) {
+            System.out.println("  - Time Window Violations: " + route.getTimeWindowViolations());
+        }
 
-        System.out.println("Route Sequence:");
+        if (route.getCapacityViolations() > 0) {
+            System.out.println("  - Capacity Violations: " + route.getCapacityViolations());
+        }
+
+        if (!route.getRechargingStations().isEmpty()) {
+            System.out.println("  - Recharging Stations: " + formatLocationSequence(route.getRechargingStations()));
+        }
+
+        printRouteSequence(route);
+        printRouteMap(route , obstacles, weatherZones);
+    }
+    private static void printRouteSequence(Route route) {
+        List<Location> locations = route.getLocations();
+
+        System.out.println("\nRoute Sequence:");
         System.out.println("┌───────┬─────────────┬─────────────┬──────────────┬────────────┐");
         System.out.println("│ Step  │ Location ID │ Coordinates │  Time Window │   Type     │");
         System.out.println("├───────┼─────────────┼─────────────┼──────────────┼────────────┤");
 
-        List<Location> path = route.getLocations();
-        for (int i = 0; i < path.size(); i++) {
-            Location loc = path.get(i);
+        for (int i = 0; i < locations.size(); i++) {
+            Location loc = locations.get(i);
+            String type = loc.getType();
+
+            // Highlight charging stations in red
+            String formattedType = type;
+            if (type.equalsIgnoreCase("charging_station")) {
+                formattedType = "\u001B[31m" + type + "\u001B[0m"; // Red color
+            }
+
             System.out.printf("│ %5d │ %11d │ (%6.2f,%6.2f) │ %4.1f - %4.1f │ %-10s │%n",
                     i+1, loc.getId(), loc.getX(), loc.getY(),
-                    loc.getTimeWindow()[0], loc.getTimeWindow()[1], loc.getType());
+                    loc.getTimeWindow()[0], loc.getTimeWindow()[1], formattedType);
         }
+
         System.out.println("└───────┴─────────────┴─────────────┴──────────────┴────────────┘");
     }
 
-    private static void printPerformanceMetrics(Route route) {
-        System.out.println("\n" + BORDER);
-        System.out.println("PERFORMANCE METRICS");
-        System.out.println(BORDER);
-
-        System.out.printf("Total Distance: %s km%n", df.format(route.getTotalDistance()));
-        System.out.printf("Total Cost: $%s%n", df.format(route.getTotalCost()));
-        System.out.printf("Total Travel Time: %s hours%n%n", df.format(route.getTotalTravelTime()));
-
-        System.out.println("Battery Usage Analysis:");
-        System.out.printf("  Recharging Events: %d%n", route.getRechargingStations().size());
-        System.out.printf("  Total Recharging Cost: $%s%n%n", df.format(route.getTotalCost()));
-
-        System.out.println("Constraint Compliance:");
-        System.out.printf("  Time Window Violations: %d%n", countTimeWindowViolations(route));
-        System.out.printf("  Capacity Violations: %d%n", countCapacityViolations(route));
-    }
-
-    private static int countTimeWindowViolations(Route route) {
-        return route.getTimeWindowViolations();
-    }
-
-    private static int countCapacityViolations(Route route) {
-        return route.getCapacityViolations();
-    }
-
-    private static void printVisualization(List<Location> locations,
-                                           List<WeatherZone> weatherZones,
-                                           List<Obstacle> obstacles,
-                                           Route route) {
-        System.out.println("\n" + BORDER);
-        System.out.println("ENHANCED ROUTE VISUALIZATION");
-        System.out.println(BORDER);
-
-        // ASCII map dimensions
-        final int MAP_WIDTH = 80;
-        final int MAP_HEIGHT = 30;
-        final double CELL_SIZE = 2.0; // km per character
-
-        // Find coordinate bounds with padding
-        double minX = locations.stream().mapToDouble(Location::getX).min().orElse(0) - 5;
-        double maxX = locations.stream().mapToDouble(Location::getX).max().orElse(1) + 5;
-        double minY = locations.stream().mapToDouble(Location::getY).min().orElse(0) - 5;
-        double maxY = locations.stream().mapToDouble(Location::getY).max().orElse(1) + 5;
-
-        // Calculate scaling factors
-        double xScale = (maxX - minX) / MAP_WIDTH;
-        double yScale = (maxY - minY) / MAP_HEIGHT;
-
-        // Legend
-        System.out.println("Legend: [D] Depot [C] Customer [⚡] Charging Station");
-        System.out.println("        [W] Weather Zone [O] Obstacle [*] Route Path\n");
-
-        // Create grid
-        char[][] grid = new char[MAP_HEIGHT][MAP_WIDTH];
-        for (char[] row : grid) Arrays.fill(row, '.');
-
-        // Draw weather zones
-        for (WeatherZone zone : weatherZones) {
-            int startX = (int) ((zone.getXMin() - minX) / xScale);
-            int endX = (int) ((zone.getXMax() - minX) / xScale);
-            int startY = (int) ((maxY - zone.getYMax()) / yScale);
-            int endY = (int) ((maxY - zone.getYMin()) / yScale);
-
-            for (int y = startY; y < endY; y++) {
-                for (int x = startX; x < endX; x++) {
-                    if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-                        grid[y][x] = 'W';
-                    }
-                }
-            }
-        }
-
-        // Draw obstacles
-        for (Obstacle obs : obstacles) {
-            int centerX = (int) ((obs.getCenterX() - minX) / xScale);
-            int centerY = (int) ((maxY - obs.getCenterY()) / yScale);
-            int radius = (int) (obs.getRadius() / (CELL_SIZE * xScale));
-
-            for (int y = centerY - radius; y <= centerY + radius; y++) {
-                for (int x = centerX - radius; x <= centerX + radius; x++) {
-                    if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-                        double dx = (x - centerX) * xScale;
-                        double dy = (y - centerY) * yScale;
-                        if (Math.sqrt(dx*dx + dy*dy) <= obs.getRadius()) {
-                            grid[y][x] = 'O';
-                        }
-                    }
-                }
-            }
-        }
-
-        // Draw route path
-        List<Location> path = route.getLocations();
-        Location prev = path.get(0);
-        for (Location loc : path) {
-            int x = (int) ((loc.getX() - minX) / xScale);
-            int y = (int) ((maxY - loc.getY()) / yScale);
-            if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-                grid[y][x] = '*';
-
-                // Draw line between consecutive locations
-                int prevX = (int) ((prev.getX() - minX) / xScale);
-                int prevY = (int) ((maxY - prev.getY()) / yScale);
-                drawLine(grid, prevX, prevY, x, y);
-
-                prev = loc;
-            }
-        }
-
-        // Draw locations on top
+    private static String formatLocationSequence(List<Location> locations) {
+        StringBuilder sb = new StringBuilder();
         for (Location loc : locations) {
-            int x = (int) ((loc.getX() - minX) / xScale);
-            int y = (int) ((maxY - loc.getY()) / yScale);
-            if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-                grid[y][x] = getLocationSymbol(loc);
-            }
+            sb.append(loc.getId());
+            if (loc.getType().equalsIgnoreCase("depot")) sb.append("(D)");
+            else if (loc.getType().equalsIgnoreCase("charging_station")) sb.append("(S)");
+            sb.append(" → ");
         }
 
-        // Print the grid
-        for (char[] row : grid) {
-            System.out.println(new String(row)
-                    .replace("W", "\u001B[34mW\u001B[0m")  // Blue weather zones
-                    .replace("O", "\u001B[31mO\u001B[0m")  // Red obstacles
-                    .replace("*", "\u001B[32m*\u001B[0m"));// Green route path
-        }
-    }
-
-    // Bresenham's line algorithm for drawing routes
-    private static void drawLine(char[][] grid, int x0, int y0, int x1, int y1) {
-        int dx = Math.abs(x1 - x0);
-        int dy = Math.abs(y1 - y0);
-        int sx = x0 < x1 ? 1 : -1;
-        int sy = y0 < y1 ? 1 : -1;
-        int err = dx - dy;
-
-        while (true) {
-            if (x0 >= 0 && x0 < grid[0].length && y0 >= 0 && y0 < grid.length) {
-                if (grid[y0][x0] == '.') grid[y0][x0] = '*';
-            }
-
-            if (x0 == x1 && y0 == y1) break;
-            int e2 = 2 * err;
-            if (e2 > -dy) {
-                err -= dy;
-                x0 += sx;
-            }
-            if (e2 < dx) {
-                err += dx;
-                y0 += sy;
-            }
-        }
-    }
-    private static char getLocationSymbol(Location loc) {
-        return switch (loc.getType().toLowerCase()) {
-            case "depot" -> 'D';
-            case "charging station" -> '⚡';
-            default -> 'C';
-        };
-    }
-
-    private static double distance(double x1, double x2, double y1, double y2) {
-        return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2));
+        if (sb.length() > 3) sb.setLength(sb.length() - 3);
+        return sb.toString();
     }
 }

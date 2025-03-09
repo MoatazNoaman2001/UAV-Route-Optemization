@@ -17,4 +17,14 @@ public class Obstacle {
     public double getCenterY() { return centerY; }
     public double getRadius() { return radius; }
     public double getPenalty() { return penalty; }
+
+    @Override
+    public String toString() {
+        return "Obstacle{" +
+                "centerX=" + centerX +
+                ", centerY=" + centerY +
+                ", radius=" + radius +
+                ", penalty=" + penalty +
+                '}';
+    }
 }

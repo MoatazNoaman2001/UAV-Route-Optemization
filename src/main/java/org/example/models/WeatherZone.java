@@ -14,6 +14,18 @@ public class WeatherZone {
         this.windAngle = windAngle;
     }
 
+    @Override
+    public String toString() {
+        return "WeatherZone{" +
+                "xMin=" + xMin +
+                ", xMax=" + xMax +
+                ", yMin=" + yMin +
+                ", yMax=" + yMax +
+                ", windSpeed=" + windSpeed +
+                ", windAngle=" + windAngle +
+                '}';
+    }
+
     // Getters
     public double getXMin() { return xMin; }
     public double getXMax() { return xMax; }
