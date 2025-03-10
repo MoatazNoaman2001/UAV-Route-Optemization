@@ -303,6 +303,84 @@ public class Route {
                 Math.cos(Math.toRadians(windAngle)));
     }
 
+
+
+    /**
+     * Debugging method to validate route and identify potential issues
+     * Add this to the Route class
+     */
+    public boolean validateRoute() {
+        // Check if the route starts and ends at the depot
+        if (locations.isEmpty()) {
+            System.out.println("ERROR: Empty route detected");
+            return false;
+        }
+
+        Location first = locations.get(0);
+        Location last = locations.get(locations.size() - 1);
+
+        if (!first.getType().equalsIgnoreCase("depot")) {
+            System.out.println("ERROR: Route does not start at depot. Starts at: " + first.getId() + " (" + first.getType() + ")");
+            return false;
+        }
+
+        if (!last.getType().equalsIgnoreCase("depot")) {
+            System.out.println("ERROR: Route does not end at depot. Ends at: " + last.getId() + " (" + last.getType() + ")");
+            return false;
+        }
+
+        // Check for duplicate locations (except depot)
+        List<Integer> locationIds = new ArrayList<>();
+        for (Location loc : locations) {
+            if (!loc.getType().equalsIgnoreCase("depot") &&
+                    !loc.getType().equalsIgnoreCase("charging_station")) {
+                if (locationIds.contains(loc.getId())) {
+                    System.out.println("ERROR: Duplicate location detected: " + loc.getId());
+                    return false;
+                }
+                locationIds.add(loc.getId());
+            }
+        }
+
+        // Check capacity constraint
+        double totalDemand = getTotalDemand();
+        if (totalDemand > drone.getPayloadCapacity()) {
+            System.out.println("ERROR: Capacity exceeded: " + totalDemand + " > " + drone.getPayloadCapacity());
+            return false;
+        }
+
+        // Check for potentially problematic intersections with obstacles or weather zones
+        int obstacleIntersections = 0;
+        int weatherIntersections = 0;
+
+        for (int i = 0; i < locations.size() - 1; i++) {
+            Location current = locations.get(i);
+            Location next = locations.get(i + 1);
+
+            for (Obstacle obstacle : obstacles) {
+                if (intersectsObstacle(current, next, obstacle)) {
+                    obstacleIntersections++;
+                }
+            }
+
+            for (WeatherZone zone : weatherZones) {
+                if (intersectsWeatherZone(current, next, zone)) {
+                    weatherIntersections++;
+                }
+            }
+        }
+
+        if (obstacleIntersections > 10) {
+            System.out.println("WARNING: High number of obstacle intersections: " + obstacleIntersections);
+        }
+
+        if (weatherIntersections > 10) {
+            System.out.println("WARNING: High number of weather zone intersections: " + weatherIntersections);
+        }
+
+        return true;
+    }
+
     // Getters and setters
 
     public Drone getDrone() {

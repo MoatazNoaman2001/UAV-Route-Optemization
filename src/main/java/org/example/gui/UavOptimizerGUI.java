@@ -1,5 +1,8 @@
-package org.example;
+package org.example.gui;
 
+import org.example.Driver;
+import org.example.HybridAlgorithm;
+import org.example.Route;
 import org.example.models.Drone;
 import org.example.models.Location;
 import org.example.models.Obstacle;
@@ -314,7 +317,7 @@ public class UavOptimizerGUI extends JFrame {
         mapDialog.setSize(900, 700);
         mapDialog.setLocationRelativeTo(this);
 
-        org.example.RouteMapViewer mapViewer = new org.example.RouteMapViewer(optimalRoutes, obstacles, weatherZones);
+        RouteMapViewer mapViewer = new RouteMapViewer(optimalRoutes, obstacles, weatherZones);
         mapDialog.setContentPane(mapViewer);
         mapDialog.setVisible(true);
 

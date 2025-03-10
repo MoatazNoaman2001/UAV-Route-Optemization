@@ -1,5 +1,6 @@
-package org.example;
+package org.example.gui;
 
+import org.example.Route;
 import org.example.models.Location;
 import org.example.models.Obstacle;
 import org.example.models.WeatherZone;

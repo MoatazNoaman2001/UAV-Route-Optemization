@@ -83,27 +83,56 @@ public class HybridAlgorithm {
         List<List<Route>> individuals = population.getIndividuals();
         List<Route> bestSolution = getBestIndividual(individuals);
         double bestFitness = calculateFitness(bestSolution);
+        double previousBestFitness = bestFitness;
 
         int iterations = 0;
         int noImprovements = 0;
+        int totalIterations = 0;
+        long startTime = System.currentTimeMillis();
 
         System.out.println("Starting hybrid algorithm optimization...");
         System.out.println("Initial best solution fitness: " + bestFitness);
 
         // Main loop (while loop in Algorithm 7)
-        while (iterations < maxIterations && noImprovements < noImprovementThreshold) {
+        while (iterations < maxIterations && noImprovements < noImprovementThreshold && totalIterations < 1000) {
+            totalIterations++;
+
+            // Check for timeout (5 minutes)
+            long currentTime = System.currentTimeMillis();
+            if ((currentTime - startTime) > 5 * 60 * 1000) {
+                System.out.println("Time limit reached (5 minutes). Terminating optimization.");
+                break;
+            }
+
             // Genetic algorithm steps
             List<List<Route>> newPopulation = evolvePopulation(individuals);
 
-            // Apply simulated annealing to each individual
+            // Create a new SA instance with adjusted parameters for better convergence
             SimulatedAnnealing simulatedAnnealing = new SimulatedAnnealing(
                     locations, drones, obstacles, weatherZones,
                     initialTemperature, coolingRate, minTemperature);
 
+            // Set lower limits to prevent SA from taking too long
+            simulatedAnnealing.setMaxIterations(200);  // Limit SA iterations
+            simulatedAnnealing.setNoImprovementThreshold(50);  // Lower no improvement threshold
+
             for (int i = 0; i < newPopulation.size(); i++) {
                 List<Route> individual = newPopulation.get(i);
-                List<Route> improvedIndividual = simulatedAnnealing.optimize(individual);
-                newPopulation.set(i, improvedIndividual);
+
+                // Skip empty individuals
+                if (individual.isEmpty()) {
+                    continue;
+                }
+
+                // Apply SA with timeout protection
+                List<Route> improvedIndividual;
+                try {
+                    improvedIndividual = simulatedAnnealing.optimize(individual);
+                    newPopulation.set(i, improvedIndividual);
+                } catch (Exception e) {
+                    System.err.println("Error in SA optimization for individual " + i + ": " + e.getMessage());
+                    // Keep the original individual if SA fails
+                }
             }
 
             // Find current best solution
@@ -112,12 +141,25 @@ public class HybridAlgorithm {
 
             // Apply 3-opt local search to the best solution (lines 22-32 in Algorithm 7)
             if (currentFitness < bestFitness) {
+                double improvement = bestFitness - currentFitness;
+                double relativeImprovement = improvement / bestFitness * 100;
+
                 bestSolution = currentBest;
                 bestFitness = currentFitness;
                 noImprovements = 0;
-                System.out.println("New best solution found with fitness: " + bestFitness);
+                System.out.println("New best solution found with fitness: " + bestFitness +
+                        " (Improvement: " + relativeImprovement + "%)");
+
+                // Reset previous best for tracking significant improvements
+                previousBestFitness = bestFitness;
             } else {
                 noImprovements++;
+
+                // Check if we're making minimal progress
+                if (Math.abs(previousBestFitness - bestFitness) < 0.001 && noImprovements > 20) {
+                    System.out.println("Minimal progress detected. Accelerating termination.");
+                    noImprovements = noImprovementThreshold;  // Force termination
+                }
             }
 
             // Update population for next iteration
@@ -125,10 +167,23 @@ public class HybridAlgorithm {
             iterations++;
 
             if (iterations % 10 == 0) {
+                long elapsedTime = (System.currentTimeMillis() - startTime) / 1000;
                 System.out.println("Iteration " + iterations +
                         ", Best fitness: " + bestFitness +
-                        ", No improvements: " + noImprovements);
+                        ", No improvements: " + noImprovements +
+                        ", Time elapsed: " + elapsedTime + " seconds");
             }
+        }
+
+        // Print termination reason
+        if (iterations >= maxIterations) {
+            System.out.println("Optimization terminated: maximum iterations reached");
+        } else if (noImprovements >= noImprovementThreshold) {
+            System.out.println("Optimization terminated: no improvement threshold reached");
+        } else if (totalIterations >= 1000) {
+            System.out.println("Optimization terminated: safety iteration limit reached");
+        } else {
+            System.out.println("Optimization terminated: time limit reached");
         }
 
         System.out.println("Optimization completed after " + iterations + " iterations");

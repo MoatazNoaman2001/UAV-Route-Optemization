@@ -10,6 +10,7 @@ import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.*;
 
 import static org.example.MapVisualization.printRouteMap;
 
@@ -25,23 +26,46 @@ public class Driver {
 
             printInputSummary(locations, drones, weatherZones, obstacles);
 
-            System.out.println("\n==== Running Hybrid Algorithm ====\n");
+            System.out.println("\n==== Running Hybrid Algorithm with Timeout Protection ====\n");
 
+            // Set up execution with timeout
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+
+            // Create the algorithm
             HybridAlgorithm algorithm = new HybridAlgorithm(drones, locations, weatherZones, obstacles, 1000.0, 0.005, 1.0);
-            List<Route> optimalRoutes = algorithm.findOptimalRoutes();
 
-            System.out.println("\n==== Results ====\n");
-            System.out.println("Routes found: " + optimalRoutes.size());
+            // Submit the task
+            Future<List<Route>> future = executor.submit(() -> algorithm.findOptimalRoutes());
 
-            double totalCost = 0.0;
-            for (int i = 0; i < optimalRoutes.size(); i++) {
-                Route route = optimalRoutes.get(i);
-                totalCost += route.getTotalCost();
-                System.out.println("\nRoute #" + (i+1) + " (Drone #" + route.getDrone().getId() + "):");
-                printRouteDetails(route);
+            List<Route> optimalRoutes;
+            try {
+                // Wait for result, but with a timeout (10 minutes)
+                optimalRoutes = future.get(10, TimeUnit.MINUTES);
+
+                System.out.println("\n==== Results ====\n");
+                System.out.println("Routes found: " + optimalRoutes.size());
+
+                double totalCost = 0.0;
+                for (int i = 0; i < optimalRoutes.size(); i++) {
+                    Route route = optimalRoutes.get(i);
+                    totalCost += route.getTotalCost();
+                    System.out.println("\nRoute #" + (i+1) + " (Drone #" + route.getDrone().getId() + "):");
+                    printRouteDetails(route);
+                }
+
+                System.out.println("\nTotal cost: " + totalCost);
+
+            } catch (TimeoutException e) {
+                System.err.println("ERROR: Algorithm timed out after 10 minutes.");
+                System.err.println("This might indicate an infinite loop or a very computationally expensive problem.");
+                System.err.println("Consider modifying algorithm parameters or checking for issues in the code.");
+                future.cancel(true);
+            } catch (Exception e) {
+                System.err.println("Error executing algorithm: " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                executor.shutdownNow();
             }
-
-            System.out.println("\nTotal cost: " + totalCost);
 
         } catch (FileNotFoundException e) {
             System.err.println("Error: " + e.getMessage());

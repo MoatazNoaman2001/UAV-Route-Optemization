@@ -1,4 +1,4 @@
-package org.example;
+package org.example.gui;
 
 import org.example.models.Drone;
 import org.example.models.Location;
@@ -26,7 +26,7 @@ public class UavOptimizerApp {
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
-                new org.example.UavOptimizerGUI().setVisible(true);
+                new UavOptimizerGUI().setVisible(true);
             }
         });
     }

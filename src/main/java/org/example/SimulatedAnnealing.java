@@ -74,7 +74,6 @@ public class SimulatedAnnealing {
 //     * @param solution Initial solution to optimize
      * @return Optimized solution after applying simulated annealing
      */
-
     public List<Route> optimize(List<Route> initialSolution) {
         // Start with the provided solution or generate a random one if none provided
         List<Route> currentSolution = initialSolution != null && !initialSolution.isEmpty() ?
@@ -87,19 +86,32 @@ public class SimulatedAnnealing {
         double temperature = initialTemperature;
         int iterations = 0;
         int noImprovements = 0;
+        int totalIterations = 0; // Safety counter for total iterations
 
         System.out.println("Starting simulated annealing with initial cost: " + currentCost);
 
-        // Main SA loop - following structure in Algorithm 7
-        while (iterations < maxIterations && noImprovements < noImprovementLimit && temperature > minTemperature) {
-            // Apply perturbation to explore the search space - equivalent to line 9 in Algorithm 7
+        // Main SA loop
+        // Add hard safety limit for iterations to prevent infinite loops
+        while (iterations < maxIterations && noImprovements < noImprovementLimit && temperature > minTemperature && totalIterations < 5000) {
+            totalIterations++;
+
+            // Apply perturbation to explore the search space
             List<Route> perturbedSolution = perturbSolution(currentSolution);
 
-            // Apply mutation (Reverse Swap) - equivalent to line 10 in Algorithm 7
+            // Apply mutation (Reverse Swap)
             List<Route> mutatedSolution = applyReverseSwap(perturbedSolution);
 
-            // Create neighbor solution - equivalent to neighborhood exploration in SA
+            // Create neighbor solution
             double neighborCost = calculateTotalCost(mutatedSolution);
+
+            // Only consider solutions that are not drastically worse than current
+            // This prevents accepting absurdly bad solutions that might cause issues
+            if (neighborCost > currentCost * 2) {
+                noImprovements++;
+                iterations++;
+                temperature *= (1 - coolingRate);
+                continue;
+            }
 
             // Decide whether to accept the new solution using SA probability function
             if (acceptanceProbability(currentCost, neighborCost, temperature) > random.nextDouble()) {
@@ -119,8 +131,8 @@ public class SimulatedAnnealing {
                 noImprovements++;
             }
 
-            // Apply 3-opt local search periodically (equivalent to lines 22-32 in Algorithm 7)
-            if (iterations % 10 == 0) {
+            // Apply 3-opt local search periodically (reduced frequency to every 20 iterations)
+            if (iterations % 20 == 0) {
                 List<Route> improvedSolution = applyLocalSearch(bestSolution);
                 double improvedCost = calculateTotalCost(improvedSolution);
 
@@ -132,7 +144,8 @@ public class SimulatedAnnealing {
                 }
             }
 
-            // Cool down the temperature - specific to SA
+            // Cool down the temperature - use a more aggressive cooling schedule
+            // This ensures we actually reach the minimum temperature
             temperature *= (1 - coolingRate);
             iterations++;
 
@@ -140,8 +153,25 @@ public class SimulatedAnnealing {
                 System.out.println("Iteration: " + iterations +
                         ", Temperature: " + temperature +
                         ", Current Cost: " + currentCost +
-                        ", Best Cost: " + bestCost);
+                        ", Best Cost: " + bestCost +
+                        ", No Improvements: " + noImprovements);
             }
+
+            // Force some cooldown if we're seeing many iterations without improvement
+            if (noImprovements > 50) {
+                temperature *= 0.9; // Accelerate cooling
+            }
+        }
+
+        // Print termination reason for debugging
+        if (iterations >= maxIterations) {
+            System.out.println("Simulated annealing terminated due to max iterations reached");
+        } else if (noImprovements >= noImprovementLimit) {
+            System.out.println("Simulated annealing terminated due to no improvements limit reached");
+        } else if (temperature <= minTemperature) {
+            System.out.println("Simulated annealing terminated due to minimum temperature reached");
+        } else if (totalIterations >= 5000) {
+            System.out.println("Simulated annealing terminated due to safety iteration limit reached");
         }
 
         System.out.println("Simulated annealing completed with best cost: " + bestCost);
@@ -266,62 +296,101 @@ public class SimulatedAnnealing {
         if (neighbor.isEmpty()) return neighbor;
 
         Random rand = new Random();
+        int maxAttempts = 5; // Limit the number of attempts to avoid getting stuck
+
+        // Choose perturbation type
         int perturbationType = rand.nextInt(3);
 
-        switch (perturbationType) {
-            case 0: // Swap locations between two routes
-                if (neighbor.size() >= 2) {
-                    int routeIdx1 = rand.nextInt(neighbor.size());
-                    int routeIdx2 = rand.nextInt(neighbor.size());
-                    while (routeIdx1 == routeIdx2 && neighbor.size() > 1) {
-                        routeIdx2 = rand.nextInt(neighbor.size());
-                    }
+        boolean successful = false;
+        int attempts = 0;
 
-                    Route route1 = neighbor.get(routeIdx1);
-                    Route route2 = neighbor.get(routeIdx2);
+        while (!successful && attempts < maxAttempts) {
+            attempts++;
 
-                    if (route1.getLocations().size() > 2 && route2.getLocations().size() > 2) {
-                        // Skip depot at first and last positions
-                        int loc1Idx = 1 + rand.nextInt(route1.getLocations().size() - 2);
-                        int loc2Idx = 1 + rand.nextInt(route2.getLocations().size() - 2);
+            switch (perturbationType) {
+                case 0: // Swap locations between two routes
+                    if (neighbor.size() >= 2) {
+                        int routeIdx1 = rand.nextInt(neighbor.size());
+                        int routeIdx2 = rand.nextInt(neighbor.size());
 
-                        Location loc1 = route1.getLocations().get(loc1Idx);
-                        Location loc2 = route2.getLocations().get(loc2Idx);
+                        while (routeIdx1 == routeIdx2 && neighbor.size() > 1) {
+                            routeIdx2 = rand.nextInt(neighbor.size());
+                        }
 
-                        // Check capacity constraints
-                        double newDemand1 = route1.getTotalDemand() - loc1.getDemand() + loc2.getDemand();
-                        double newDemand2 = route2.getTotalDemand() - loc2.getDemand() + loc1.getDemand();
+                        Route route1 = neighbor.get(routeIdx1);
+                        Route route2 = neighbor.get(routeIdx2);
 
-                        if (route1.getDrone().getPayloadCapacity() >= newDemand1 &&
-                                route2.getDrone().getPayloadCapacity() >= newDemand2) {
+                        if (route1.getLocations().size() > 2 && route2.getLocations().size() > 2) {
+                            // Skip depot at first and last positions
+                            int loc1Idx = 1 + rand.nextInt(route1.getLocations().size() - 2);
+                            int loc2Idx = 1 + rand.nextInt(route2.getLocations().size() - 2);
 
-                            // Swap locations
-                            route1.getLocations().set(loc1Idx, loc2);
-                            route2.getLocations().set(loc2Idx, loc1);
+                            Location loc1 = route1.getLocations().get(loc1Idx);
+                            Location loc2 = route2.getLocations().get(loc2Idx);
+
+                            // Validate that we're not working with depots or charging stations
+                            if (!loc1.getType().equalsIgnoreCase("depot") && !loc1.getType().equalsIgnoreCase("charging_station") &&
+                                    !loc2.getType().equalsIgnoreCase("depot") && !loc2.getType().equalsIgnoreCase("charging_station")) {
+
+                                // Check capacity constraints
+                                double newDemand1 = route1.getTotalDemand() - loc1.getDemand() + loc2.getDemand();
+                                double newDemand2 = route2.getTotalDemand() - loc2.getDemand() + loc1.getDemand();
+
+                                if (route1.getDrone().getPayloadCapacity() >= newDemand1 &&
+                                        route2.getDrone().getPayloadCapacity() >= newDemand2) {
+
+                                    // Swap locations
+                                    route1.getLocations().set(loc1Idx, loc2);
+                                    route2.getLocations().set(loc2Idx, loc1);
+                                    successful = true;
+                                }
+                            }
                         }
                     }
-                }
-                break;
+                    break;
 
-            case 1: // Reverse a random segment in a random route
-                return applyReverseSwap(neighbor);
+                case 1: // Reverse a random segment in a random route
+                    List<Route> reversedSolution = applyReverseSwap(neighbor);
+                    if (!reversedSolution.isEmpty()) {
+                        neighbor = reversedSolution;
+                        successful = true;
+                    }
+                    break;
 
-            case 2: // Randomly insert a location within a route
-                int routeIndex = rand.nextInt(neighbor.size());
-                Route route = neighbor.get(routeIndex);
-                List<Location> locs = route.getLocations();
+                case 2: // Randomly insert a location within a route
+                    int routeIndex = rand.nextInt(neighbor.size());
+                    Route route = neighbor.get(routeIndex);
+                    List<Location> locs = route.getLocations();
 
-                if (locs.size() > 3) {
-                    // Choose a location to move (excluding depot at start and end)
-                    int removeIdx = 1 + rand.nextInt(locs.size() - 2);
-                    Location locToMove = locs.get(removeIdx);
-                    locs.remove(removeIdx);
+                    if (locs.size() > 3) {
+                        // Choose a location to move (excluding depot at start and end)
+                        int removeIdx = 1 + rand.nextInt(locs.size() - 2);
+                        Location locToMove = locs.get(removeIdx);
 
-                    // Choose a new position to insert
-                    int insertIdx = 1 + rand.nextInt(locs.size() - 1);
-                    locs.add(insertIdx, locToMove);
-                }
-                break;
+                        // Skip if it's a depot or charging station
+                        if (!locToMove.getType().equalsIgnoreCase("depot") &&
+                                !locToMove.getType().equalsIgnoreCase("charging_station")) {
+
+                            locs.remove(removeIdx);
+
+                            // Choose a new position to insert (avoiding start and end positions)
+                            int insertIdx = 1 + rand.nextInt(locs.size() - 1);
+                            locs.add(insertIdx, locToMove);
+                            successful = true;
+                        }
+                    }
+                    break;
+            }
+
+            // If current type failed, try another type
+            if (!successful) {
+                perturbationType = (perturbationType + 1) % 3;
+            }
+        }
+
+        // If all attempts failed, return original solution
+        if (!successful) {
+            System.out.println("Warning: Failed to perturb solution after " + maxAttempts + " attempts");
         }
 
         return neighbor;
@@ -444,8 +513,17 @@ public class SimulatedAnnealing {
      * @param solution The solution to improve
      * @return An improved solution after applying 3-opt
      */
+    /**
+     * Apply 3-opt local search to improve a solution
+     * This implements lines 22-32 in Algorithm 7 from the project documentation
+     * Fixed version to prevent infinite loops
+     *
+     * @param solution The solution to improve
+     * @return An improved solution after applying 3-opt
+     */
     private List<Route> applyLocalSearch(List<Route> solution) {
         List<Route> improvedSolution = deepCopy(solution);
+        System.out.println("Starting local search optimization...");
 
         for (int r = 0; r < improvedSolution.size(); r++) {
             Route route = improvedSolution.get(r);
@@ -455,14 +533,18 @@ public class SimulatedAnnealing {
                 continue;
             }
 
-            boolean improved = true;
-            int iterationsWithoutImprovement = 0;
+            // Track the total iterations for this route to ensure termination
+            int totalIterations = 0;
+            int maxTotalIterations = 100; // Hard limit on iterations
+            int consecutiveNoImprovements = 0;
+            int maxConsecutiveNoImprovements = 10;
 
-            // Limit the number of iterations to prevent getting stuck
-            while (improved && iterationsWithoutImprovement < 10) {
-                improved = false;
+            while (totalIterations < maxTotalIterations && consecutiveNoImprovements < maxConsecutiveNoImprovements) {
+                boolean foundImprovement = false;
+                totalIterations++;
 
                 // Try all possible 3-opt moves
+                outerLoop:
                 for (int i = 1; i < locations.size() - 3; i++) {
                     for (int j = i + 1; j < locations.size() - 2; j++) {
                         for (int k = j + 1; k < locations.size() - 1; k++) {
@@ -479,29 +561,36 @@ public class SimulatedAnnealing {
 
                                     if (optionRoute.getTotalCost() < originalRoute.getTotalCost()) {
                                         route.setLocations(new ArrayList<>(option));
-                                        improved = true;
-                                        iterationsWithoutImprovement = 0;
-                                        break;
+                                        foundImprovement = true;
+                                        break outerLoop; // Exit all nested loops once improvement is found
                                     }
                                 }
                             }
-
-                            if (improved) break;
                         }
-                        if (improved) break;
                     }
-                    if (improved) break;
                 }
 
-                if (!improved) {
-                    iterationsWithoutImprovement++;
+                // Update the consecutive no improvements counter
+                if (foundImprovement) {
+                    consecutiveNoImprovements = 0;
+                    System.out.println("Route #" + r + " improved in iteration " + totalIterations);
+                } else {
+                    consecutiveNoImprovements++;
+                }
+
+                // Log progress every 10 iterations
+                if (totalIterations % 10 == 0) {
+                    System.out.println("Local search for route #" + r + ": " + totalIterations +
+                            " iterations, " + consecutiveNoImprovements + " consecutive no improvements");
                 }
             }
+
+            System.out.println("Local search for route #" + r + " completed after " + totalIterations +
+                    " iterations with " + consecutiveNoImprovements + " consecutive no improvements");
         }
 
         return improvedSolution;
     }
-
     /**
      * Generate all possible 3-opt options for a route
      * This generates the 7 possible reconnections for 3-opt local search
