@@ -168,36 +168,36 @@ public class RouteMapViewer extends JPanel {
         private void calculateMapBounds() {
             // Initialize with first location
             if (!route.getLocations().isEmpty()) {
-                minX = maxX = route.getLocations().get(0).getX();
-                minY = maxY = route.getLocations().get(0).getY();
+                minX = maxX = route.getLocations().getFirst().getX();
+                minY = maxY = route.getLocations().getFirst().getY();
             } else {
                 minX = minY = 0;
                 maxX = maxY = 100;
             }
 
             // Expand to include all locations
-            for (Location loc : route.getLocations()) {
+            route.getLocations().forEach(loc -> {
                 minX = Math.min(minX, loc.getX());
                 maxX = Math.max(maxX, loc.getX());
                 minY = Math.min(minY, loc.getY());
                 maxY = Math.max(maxY, loc.getY());
-            }
+            });
 
             // Expand to include obstacles
-            for (Obstacle obs : obstacles) {
+            obstacles.forEach(obs -> {
                 minX = Math.min(minX, obs.getCenterX() - obs.getRadius());
                 maxX = Math.max(maxX, obs.getCenterX() + obs.getRadius());
                 minY = Math.min(minY, obs.getCenterY() - obs.getRadius());
                 maxY = Math.max(maxY, obs.getCenterY() + obs.getRadius());
-            }
+            });
 
             // Expand to include weather zones
-            for (WeatherZone zone : weatherZones) {
+            weatherZones.forEach(zone -> {
                 minX = Math.min(minX, zone.getXMin());
                 maxX = Math.max(maxX, zone.getXMax());
                 minY = Math.min(minY, zone.getYMin());
                 maxY = Math.max(maxY, zone.getYMax());
-            }
+            });
 
             // Add padding
             double width = maxX - minX;
@@ -223,22 +223,16 @@ public class RouteMapViewer extends JPanel {
             double scale = Math.min(xScale, yScale);
 
             // Draw weather zones
-            for (WeatherZone zone : weatherZones) {
-                drawWeatherZone(g2d, zone, scale);
-            }
+            weatherZones.forEach(zone -> drawWeatherZone(g2d, zone, scale));
 
             // Draw obstacles
-            for (Obstacle obstacle : obstacles) {
-                drawObstacle(g2d, obstacle, scale);
-            }
+            obstacles.forEach(obstacle -> drawObstacle(g2d, obstacle, scale));
 
             // Draw route
             drawRoute(g2d, route, scale);
 
             // Draw location markers
-            for (Location loc : route.getLocations()) {
-                drawLocation(g2d, loc, scale);
-            }
+            route.getLocations().forEach(loc -> drawLocation(g2d, loc, scale));
 
             // Draw route info
             drawRouteInfo(g2d);
