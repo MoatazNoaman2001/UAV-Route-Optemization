@@ -10,6 +10,7 @@ import java.util.List;
 
 /**
  * Route class represents a path for a drone to follow, including cost calculations
+ * Modified to properly handle battery constraints and charging stations
  */
 public class Route {
     private Drone drone;
@@ -25,7 +26,9 @@ public class Route {
     private double totalDemand = -1;
     private int timeWindowViolations = -1;
     private int capacityViolations = -1;
+    private int batteryViolations = -1;
     private List<Location> usedRechargingStations = new ArrayList<>();
+    private List<Double> batteryLevels = new ArrayList<>(); // Track battery at each location
 
     /**
      * Constructor with all parameters
@@ -78,6 +81,7 @@ public class Route {
 
     /**
      * Calculate total travel time including waiting and service times
+     * Modified to track battery consumption and recharging
      */
     public double getTotalTravelTime() {
         if (totalTravelTime >= 0) {
@@ -86,21 +90,54 @@ public class Route {
 
         totalTravelTime = 0;
         double currentTime = 0;
+        double currentBattery = drone.getMaxBattery(); // Start with full battery
+        batteryLevels.clear();
+        batteryLevels.add(currentBattery); // Initial battery level
 
-        // Reset time window violations count
+        // Reset violation counts
         timeWindowViolations = 0;
+        batteryViolations = 0;
+        usedRechargingStations.clear();
 
         for (int i = 0; i < locations.size() - 1; i++) {
             Location current = locations.get(i);
             Location next = locations.get(i + 1);
 
-            // Calculate travel time based on distance and drone speed
+            // Calculate travel time and energy consumption based on distance
             double distance = calculateDistance(current, next);
             double travelTime = distance / drone.getSpeed();
+
+            // Calculate energy consumption for this segment
+            double payload = getTotalDemand(); // Use the total demand as current payload
+            double energyConsumption = calculateEnergyConsumption(distance, payload);
+
+            // Subtract energy consumption from current battery
+            currentBattery -= energyConsumption;
+
+            // Check if battery would go below minimum
+            if (currentBattery < drone.getMinBattery()) {
+                // Battery violation occurred
+                batteryViolations++;
+
+                // If current location is not a charging station, calculate penalty
+                if (!current.getType().equalsIgnoreCase("charging_station")) {
+                    totalTravelTime += 1000; // High penalty for battery violation
+                }
+
+                // If we're at a charging station, recharge
+                if (current.getType().equalsIgnoreCase("charging_station")) {
+                    currentBattery = drone.getMaxBattery();
+                    totalTravelTime += drone.getRechargingTime();
+                    usedRechargingStations.add(current);
+                }
+            }
 
             // Add travel time
             currentTime += travelTime;
             totalTravelTime += travelTime;
+
+            // Store battery level at next location
+            batteryLevels.add(currentBattery);
 
             // Check time windows for next location
             if (!next.getType().equalsIgnoreCase("depot") && !next.getType().equalsIgnoreCase("charging_station")) {
@@ -124,10 +161,11 @@ public class Route {
                 totalTravelTime += next.getServiceTime();
             }
 
-            // If current is a charging station, add recharging time
-            if (current.getType().equalsIgnoreCase("charging_station")) {
+            // If next is a charging station, add recharging time and mark as used
+            if (next.getType().equalsIgnoreCase("charging_station")) {
                 totalTravelTime += drone.getRechargingTime();
-                usedRechargingStations.add(current);
+                currentBattery = drone.getMaxBattery(); // Fully recharge
+                usedRechargingStations.add(next);
             }
         }
 
@@ -135,7 +173,20 @@ public class Route {
     }
 
     /**
+     * Calculate energy consumption for a route segment
+     * @param distance Distance traveled
+     * @param payload Current payload weight
+     * @return Energy consumed
+     */
+    private double calculateEnergyConsumption(double distance, double payload) {
+        // Base energy consumption plus payload-dependent consumption
+        return distance * (drone.getBaseEnergyConsumption() +
+                payload * drone.getPayloadEnergyCoefficient());
+    }
+
+    /**
      * Calculate total cost of the route, combining distance, time, and recharging costs
+     * Modified to include battery violation penalties
      */
     public double getTotalCost() {
         if (totalCost >= 0) {
@@ -149,14 +200,13 @@ public class Route {
         // Calculate recharging costs
         double rechargingCost = usedRechargingStations.size() * drone.getRechargingCost();
 
-        // Calculate time window violation penalties
+        // Calculate violation penalties
         double timeWindowPenalty = getTimeWindowViolations() * 500;
-
-        // Calculate capacity violation penalties
         double capacityPenalty = getCapacityViolations() * 1000;
+        double batteryPenalty = getBatteryViolations() * 2000; // Higher penalty for battery violations
 
         // Combine all costs
-        totalCost = distance + travelTime + rechargingCost + timeWindowPenalty + capacityPenalty;
+        totalCost = distance + travelTime + rechargingCost + timeWindowPenalty + capacityPenalty + batteryPenalty;
 
         return totalCost;
     }
@@ -210,14 +260,36 @@ public class Route {
     }
 
     /**
+     * Get number of battery violations in this route
+     */
+    public int getBatteryViolations() {
+        if (batteryViolations < 0) {
+            // Force recalculation
+            getTotalTravelTime();
+        }
+        return batteryViolations;
+    }
+
+    /**
      * Get recharging stations used in this route
      */
-    public List<Location> getRechargingStations() {
+    public List<Location> getUsedRechargingStations() {
         if (totalTravelTime < 0) {
             // Force recalculation
             getTotalTravelTime();
         }
         return usedRechargingStations;
+    }
+
+    /**
+     * Get battery levels at each location
+     */
+    public List<Double> getBatteryLevels() {
+        if (batteryLevels.isEmpty()) {
+            // Force recalculation
+            getTotalTravelTime();
+        }
+        return batteryLevels;
     }
 
     /**
@@ -303,11 +375,8 @@ public class Route {
                 Math.cos(Math.toRadians(windAngle)));
     }
 
-
-
     /**
      * Debugging method to validate route and identify potential issues
-     * Add this to the Route class
      */
     public boolean validateRoute() {
         // Check if the route starts and ends at the depot
@@ -347,6 +416,15 @@ public class Route {
         if (totalDemand > drone.getPayloadCapacity()) {
             System.out.println("ERROR: Capacity exceeded: " + totalDemand + " > " + drone.getPayloadCapacity());
             return false;
+        }
+
+        // Check battery constraints
+        List<Double> batteryLevels = getBatteryLevels();
+        for (double level : batteryLevels) {
+            if (level < drone.getMinBattery()) {
+                System.out.println("ERROR: Battery level below minimum: " + level + " < " + drone.getMinBattery());
+                return false;
+            }
         }
 
         // Check for potentially problematic intersections with obstacles or weather zones
@@ -391,6 +469,10 @@ public class Route {
         return locations;
     }
 
+    public List<Location> getRechargingStations() {
+        return rechargingStations;
+    }
+
     public void setLocations(List<Location> locations) {
         this.locations = new ArrayList<>(locations);
 
@@ -401,7 +483,9 @@ public class Route {
         totalDemand = -1;
         timeWindowViolations = -1;
         capacityViolations = -1;
+        batteryViolations = -1;
         usedRechargingStations.clear();
+        batteryLevels.clear();
     }
 
     @Override
@@ -420,6 +504,7 @@ public class Route {
         sb.append("], cost=").append(getTotalCost())
                 .append(", distance=").append(getTotalDistance())
                 .append(", demand=").append(getTotalDemand())
+                .append(", batteryViolations=").append(getBatteryViolations())
                 .append("}");
 
         return sb.toString();

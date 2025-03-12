@@ -8,9 +8,7 @@ import org.example.models.WeatherZone;
 import java.util.*;
 
 /**
- * SimulatedAnnealing class implements the simulated annealing algorithm for UAV route optimization
- * as described in the project documentation. This replaces the Tabu search component in the
- * hybrid algorithm while maintaining the genetic algorithm components.
+ * Enhanced SimulatedAnnealing class with battery constraint management
  */
 public class SimulatedAnnealing {
     private final Random random = new Random();
@@ -32,14 +30,6 @@ public class SimulatedAnnealing {
 
     /**
      * Constructor for the SimulatedAnnealing algorithm
-     *
-     * @param locations List of all locations including depot, customers, and charging stations
-     * @param drones List of available drones
-     * @param obstacles List of obstacles to avoid
-     * @param weatherZones List of weather zones that affect route costs
-     * @param initialTemperature Starting temperature for SA
-     * @param coolingRate Rate at which temperature decreases
-     * @param minTemperature Minimum temperature before termination
      */
     public SimulatedAnnealing(List<Location> locations, List<Drone> drones,
                               List<Obstacle> obstacles, List<WeatherZone> weatherZones,
@@ -68,16 +58,15 @@ public class SimulatedAnnealing {
 
     /**
      * Main algorithm method to optimize UAV routes
-     * This implements the simulated annealing portion of the hybrid algorithm
-     * described in Algorithm 7 in the project documentation
-     *
-//     * @param solution Initial solution to optimize
-     * @return Optimized solution after applying simulated annealing
      */
     public List<Route> optimize(List<Route> initialSolution) {
         // Start with the provided solution or generate a random one if none provided
         List<Route> currentSolution = initialSolution != null && !initialSolution.isEmpty() ?
                 deepCopy(initialSolution) : generateInitialSolution();
+
+        // Insert charging stations to make routes feasible
+        currentSolution = insertChargingStations(currentSolution);
+
         List<Route> bestSolution = deepCopy(currentSolution);
 
         double currentCost = calculateTotalCost(currentSolution);
@@ -101,11 +90,13 @@ public class SimulatedAnnealing {
             // Apply mutation (Reverse Swap)
             List<Route> mutatedSolution = applyReverseSwap(perturbedSolution);
 
+            // Insert charging stations where needed
+            mutatedSolution = insertChargingStations(mutatedSolution);
+
             // Create neighbor solution
             double neighborCost = calculateTotalCost(mutatedSolution);
 
             // Only consider solutions that are not drastically worse than current
-            // This prevents accepting absurdly bad solutions that might cause issues
             if (neighborCost > currentCost * 2) {
                 noImprovements++;
                 iterations++;
@@ -131,9 +122,10 @@ public class SimulatedAnnealing {
                 noImprovements++;
             }
 
-            // Apply 3-opt local search periodically (reduced frequency to every 20 iterations)
+            // Apply 3-opt local search periodically
             if (iterations % 20 == 0) {
                 List<Route> improvedSolution = applyLocalSearch(bestSolution);
+                improvedSolution = insertChargingStations(improvedSolution); // Ensure battery feasibility
                 double improvedCost = calculateTotalCost(improvedSolution);
 
                 if (improvedCost < bestCost) {
@@ -144,8 +136,7 @@ public class SimulatedAnnealing {
                 }
             }
 
-            // Cool down the temperature - use a more aggressive cooling schedule
-            // This ensures we actually reach the minimum temperature
+            // Cool down the temperature
             temperature *= (1 - coolingRate);
             iterations++;
 
@@ -163,30 +154,149 @@ public class SimulatedAnnealing {
             }
         }
 
-        // Print termination reason for debugging
-        if (iterations >= maxIterations) {
-            System.out.println("Simulated annealing terminated due to max iterations reached");
-        } else if (noImprovements >= noImprovementLimit) {
-            System.out.println("Simulated annealing terminated due to no improvements limit reached");
-        } else if (temperature <= minTemperature) {
-            System.out.println("Simulated annealing terminated due to minimum temperature reached");
-        } else if (totalIterations >= 5000) {
-            System.out.println("Simulated annealing terminated due to safety iteration limit reached");
-        }
-
-        System.out.println("Simulated annealing completed with best cost: " + bestCost);
+        // Do one final battery feasibility check
+        bestSolution = insertChargingStations(bestSolution);
+        System.out.println("Simulated annealing completed with best cost: " + calculateTotalCost(bestSolution));
         return bestSolution;
     }
 
     /**
-     * Calculate the acceptance probability for the simulated annealing
-     * This is the standard Metropolis criterion used in simulated annealing
-     *
-     * @param currentCost Cost of the current solution
-     * @param neighborCost Cost of the neighbor solution
-     * @param temperature Current temperature
-     * @return Probability of accepting the new solution
+     * Insert charging stations into routes where battery would run out
+     * This is the key method to ensure drones use charging stations
      */
+    private List<Route> insertChargingStations(List<Route> solution) {
+        List<Route> result = new ArrayList<>();
+
+        for (Route route : solution) {
+            // Skip empty routes
+            if (route.getLocations().size() <= 2) {
+                result.add(route);
+                continue;
+            }
+
+            // Check if route has battery violations
+            Route checkRoute = new Route(route.getDrone(), route.getLocations(), weatherZones, obstacles, rechargingStations);
+            if (checkRoute.getBatteryViolations() == 0) {
+                // Route is already feasible - no battery violations
+                result.add(route);
+                continue;
+            }
+
+            // Route has battery violations - needs charging stations
+            List<Location> modifiedRoute = new ArrayList<>();
+            Drone drone = route.getDrone();
+            List<Location> originalLocations = route.getLocations();
+
+            // Start with depot
+            modifiedRoute.add(originalLocations.get(0));
+
+            // Track current battery level
+            double currentBattery = drone.getMaxBattery();
+
+            // Process each segment
+            for (int i = 0; i < originalLocations.size() - 1; i++) {
+                Location current = originalLocations.get(i);
+                Location next = originalLocations.get(i + 1);
+
+                // Calculate energy needed for this segment
+                double distance = calculateDistance(current, next);
+                double payload = route.getTotalDemand(); // Simplification: use route total demand
+                double energyNeeded = calculateEnergyConsumption(distance, payload, drone);
+
+                // Check if we need to recharge before continuing
+                if (currentBattery - energyNeeded < drone.getMinBattery()) {
+                    // Find nearest charging station
+                    Location nearest = findNearestChargingStation(current);
+
+                    if (nearest != null) {
+                        // Calculate energy to reach charging station
+                        double distanceToCharger = calculateDistance(current, nearest);
+                        double energyToCharger = calculateEnergyConsumption(distanceToCharger, payload, drone);
+
+                        // If we can reach the charging station
+                        if (currentBattery - energyToCharger >= drone.getMinBattery()) {
+                            // Go to charging station
+                            modifiedRoute.add(nearest);
+
+                            // Recharge
+                            currentBattery = drone.getMaxBattery();
+
+                            // Calculate energy from charger to next location
+                            double distanceFromCharger = calculateDistance(nearest, next);
+                            double energyFromCharger = calculateEnergyConsumption(distanceFromCharger, payload, drone);
+                            currentBattery -= energyFromCharger;
+                        } else {
+                            // Can't even reach the charging station, just continue and accept violation
+                            currentBattery -= energyNeeded;
+                        }
+                    } else {
+                        // No charging station available, just continue and accept violation
+                        currentBattery -= energyNeeded;
+                    }
+                } else {
+                    // No need to recharge, just update battery
+                    currentBattery -= energyNeeded;
+                }
+
+                // Add next location
+                if (i < originalLocations.size() - 2) { // Don't add the last location yet
+                    modifiedRoute.add(next);
+                }
+            }
+
+            // Add the last location (depot)
+            modifiedRoute.add(originalLocations.get(originalLocations.size() - 1));
+
+            // Create new route with modified locations
+            Route modifiedRouteObj = new Route(drone, modifiedRoute, weatherZones, obstacles, rechargingStations);
+            result.add(modifiedRouteObj);
+        }
+
+        return result;
+    }
+
+    /**
+     * Find the nearest charging station to a given location
+     */
+    private Location findNearestChargingStation(Location location) {
+        if (rechargingStations.isEmpty()) {
+            return null;
+        }
+
+        Location nearest = null;
+        double minDistance = Double.MAX_VALUE;
+
+        for (Location station : rechargingStations) {
+            double distance = calculateDistance(location, station);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearest = station;
+            }
+        }
+
+        return nearest;
+    }
+
+    /**
+     * Calculate energy consumption for a route segment
+     */
+    private double calculateEnergyConsumption(double distance, double payload, Drone drone) {
+        return distance * (drone.getBaseEnergyConsumption() +
+                payload * drone.getPayloadEnergyCoefficient());
+    }
+
+    /**
+     * Calculate distance between two locations
+     */
+    private double calculateDistance(Location a, Location b) {
+        double dx = a.getX() - b.getX();
+        double dy = a.getY() - b.getY();
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /* The remaining methods of the SimulatedAnnealing class follow,
+   with adjustments to account for battery constraints */
+
     private double acceptanceProbability(double currentCost, double neighborCost, double temperature) {
         // If the new solution is better, accept it
         if (neighborCost < currentCost) {
@@ -197,11 +307,6 @@ public class SimulatedAnnealing {
         return Math.exp((currentCost - neighborCost) / temperature);
     }
 
-    /**
-     * Generate an initial random solution using the approach described in the documentation
-     *
-     * @return Initial solution with feasible routes
-     */
     private List<Route> generateInitialSolution() {
         List<Route> solution = new ArrayList<>();
 
@@ -280,6 +385,8 @@ public class SimulatedAnnealing {
             }
         }
 
+        // Apply battery feasibility by inserting charging stations
+        solution = insertChargingStations(solution);
         return solution;
     }
 

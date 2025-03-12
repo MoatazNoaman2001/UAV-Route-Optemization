@@ -6,6 +6,7 @@ import org.example.models.Obstacle;
 import org.example.models.WeatherZone;
 
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
@@ -17,6 +18,10 @@ public class HybridAlgorithm {
     private final int populationSize;
     private final int maxIterations;
     private final int noImprovementThreshold;
+
+    // Add early termination flag and timeout parameters
+    private volatile boolean terminateEarly = false;
+    private final long maxExecutionTimeMs;
 
     // Problem data
     private final List<Drone> drones;
@@ -31,15 +36,51 @@ public class HybridAlgorithm {
     private final double minTemperature;
 
     /**
-     * Constructor for HybridAlgorithm
-     *
-     * @param drones List of available drones
-     * @param locations List of all locations including depot, customers, and charging stations
-     * @param weatherZones List of weather zones that affect route costs
-     * @param obstacles List of obstacles to avoid
-     * @param initialTemp Initial temperature for simulated annealing
-     * @param coolingRate Cooling rate for simulated annealing
-     * @param minTemp Minimum temperature for simulated annealing
+     * Constructor for HybridAlgorithm with timeout parameter
+     */
+    public HybridAlgorithm(
+            List<Drone> drones,
+            List<Location> locations,
+            List<WeatherZone> weatherZones,
+            List<Obstacle> obstacles,
+            double initialTemp,
+            double coolingRate,
+            double minTemp,
+            long maxExecutionTimeMs) {  // Added timeout parameter
+
+        this.drones = drones;
+        this.locations = locations;
+        this.weatherZones = weatherZones;
+        this.obstacles = obstacles;
+        this.initialTemperature = initialTemp;
+        this.coolingRate = coolingRate;
+        this.minTemperature = minTemp;
+        this.maxExecutionTimeMs = maxExecutionTimeMs;
+
+        // Extract charging stations from locations
+        this.rechargingStations = locations.stream()
+                .filter(loc -> loc.getType().equalsIgnoreCase("charging_station"))
+                .collect(Collectors.toList());
+
+        // Default population parameters - reduced for quicker convergence
+        this.populationSize = 30; // Reduced from 50
+        this.maxIterations = 500; // Reduced from 1000
+        this.noImprovementThreshold = 50; // Reduced from 100
+
+        // Print configuration information for debugging
+        System.out.println("HybridAlgorithm Configuration:");
+        System.out.println("- Population Size: " + populationSize);
+        System.out.println("- Max Iterations: " + maxIterations);
+        System.out.println("- No Improvement Threshold: " + noImprovementThreshold);
+        System.out.println("- Initial Temperature: " + initialTemperature);
+        System.out.println("- Cooling Rate: " + coolingRate);
+        System.out.println("- Min Temperature: " + minTemperature);
+        System.out.println("- Max Execution Time: " + maxExecutionTimeMs + "ms");
+        System.out.println("- Charging Stations: " + rechargingStations.size());
+    }
+
+    /**
+     * Alternative constructor without timeout (uses default)
      */
     public HybridAlgorithm(
             List<Drone> drones,
@@ -50,37 +91,46 @@ public class HybridAlgorithm {
             double coolingRate,
             double minTemp) {
 
-        this.drones = drones;
-        this.locations = locations;
-        this.weatherZones = weatherZones;
-        this.obstacles = obstacles;
-        this.initialTemperature = initialTemp;
-        this.coolingRate = coolingRate;
-        this.minTemperature = minTemp;
+        this(drones, locations, weatherZones, obstacles, initialTemp, coolingRate, minTemp, 3 * 60 * 1000); // 3 minutes default
+    }
 
-        // Extract charging stations from locations
-        this.rechargingStations = locations.stream()
-                .filter(loc -> loc.getType().equalsIgnoreCase("charging_station"))
-                .collect(Collectors.toList());
-
-        // Default population parameters
-        this.populationSize = 50;
-        this.maxIterations = 1000;
-        this.noImprovementThreshold = 100;
+    /**
+     * Signal to terminate algorithm early
+     */
+    public void terminate() {
+        this.terminateEarly = true;
+        System.out.println("Termination signal received. Algorithm will stop at next safe point.");
     }
 
     /**
      * Main method to find optimal routes using the hybrid algorithm
-     * This implements Algorithm 7 from the project documentation
-     *
-     * @return A list of optimized routes
+     * Enhanced with better timeout handling and debugging
      */
     public List<Route> findOptimalRoutes() {
-        // Step 1: Initial random population (PS)
+        System.out.println("Starting optimization with " + drones.size() + " drones and " +
+                locations.size() + " locations");
+
+        // Create initial population with timeout protection
         Population population = new Population(populationSize);
-        population.initialize(drones, locations, weatherZones, obstacles);
+        try {
+            System.out.println("Initializing population...");
+            population.initialize(drones, locations, weatherZones, obstacles);
+            System.out.println("Population initialized successfully");
+        } catch (Exception e) {
+            System.err.println("Error during population initialization: " + e.getMessage());
+            e.printStackTrace();
+            // Return a simple solution if initialization fails
+            return createFallbackSolution();
+        }
 
         List<List<Route>> individuals = population.getIndividuals();
+
+        // Handle empty population case
+        if (individuals.isEmpty()) {
+            System.err.println("Population initialization resulted in empty individuals list");
+            return createFallbackSolution();
+        }
+
         List<Route> bestSolution = getBestIndividual(individuals);
         double bestFitness = calculateFitness(bestSolution);
         double previousBestFitness = bestFitness;
@@ -93,85 +143,126 @@ public class HybridAlgorithm {
         System.out.println("Starting hybrid algorithm optimization...");
         System.out.println("Initial best solution fitness: " + bestFitness);
 
-        // Main loop (while loop in Algorithm 7)
-        while (iterations < maxIterations && noImprovements < noImprovementThreshold && totalIterations < 1000) {
+        // Main loop with enhanced timeout checking
+        while (iterations < maxIterations &&
+                noImprovements < noImprovementThreshold &&
+                totalIterations < 1000 &&
+                !terminateEarly) {
+
             totalIterations++;
 
-            // Check for timeout (5 minutes)
+            // Check for timeout frequently
             long currentTime = System.currentTimeMillis();
-            if ((currentTime - startTime) > 5 * 60 * 1000) {
-                System.out.println("Time limit reached (5 minutes). Terminating optimization.");
+            long elapsedTime = currentTime - startTime;
+            if (elapsedTime > maxExecutionTimeMs) {
+                System.out.println("Time limit reached (" + (maxExecutionTimeMs/1000) + " seconds). Terminating optimization.");
                 break;
             }
 
-            // Genetic algorithm steps
-            List<List<Route>> newPopulation = evolvePopulation(individuals);
+            try {
+                // Genetic algorithm steps with timeout protection
+                List<List<Route>> newPopulation = evolvePopulation(individuals);
 
-            // Create a new SA instance with adjusted parameters for better convergence
-            SimulatedAnnealing simulatedAnnealing = new SimulatedAnnealing(
-                    locations, drones, obstacles, weatherZones,
-                    initialTemperature, coolingRate, minTemperature);
+                // Create a new SA instance with adjusted parameters for better convergence
+                SimulatedAnnealing simulatedAnnealing = new SimulatedAnnealing(
+                        locations, drones, obstacles, weatherZones,
+                        initialTemperature, coolingRate, minTemperature);
 
-            // Set lower limits to prevent SA from taking too long
-            simulatedAnnealing.setMaxIterations(200);  // Limit SA iterations
-            simulatedAnnealing.setNoImprovementThreshold(50);  // Lower no improvement threshold
+                // Set lower limits to prevent SA from taking too long
+                simulatedAnnealing.setMaxIterations(100);  // Limit SA iterations (reduced from 200)
+                simulatedAnnealing.setNoImprovementThreshold(30);  // Lower no improvement threshold (reduced from 50)
 
-            for (int i = 0; i < newPopulation.size(); i++) {
-                List<Route> individual = newPopulation.get(i);
+                // Apply SA with timeout and individual progress tracking
+                for (int i = 0; i < newPopulation.size() && !terminateEarly; i++) {
+                    // Check for timeout again before processing each individual
+                    if ((System.currentTimeMillis() - startTime) > maxExecutionTimeMs) {
+                        System.out.println("Time limit reached during SA. Terminating optimization.");
+                        terminateEarly = true;
+                        break;
+                    }
 
-                // Skip empty individuals
-                if (individual.isEmpty()) {
-                    continue;
+                    List<Route> individual = newPopulation.get(i);
+
+                    // Skip empty individuals
+                    if (individual.isEmpty()) {
+                        continue;
+                    }
+
+                    // Apply SA with timeout protection
+                    try {
+                        // Create a timeout for just this SA operation
+                        ExecutorService executor = Executors.newSingleThreadExecutor();
+                        Future<List<Route>> future = executor.submit(() -> simulatedAnnealing.optimize(individual));
+
+                        try {
+                            // Wait for just 10 seconds for each individual
+                            List<Route> improvedIndividual = future.get(10, TimeUnit.SECONDS);
+                            newPopulation.set(i, improvedIndividual);
+                        } catch (TimeoutException e) {
+                            System.out.println("SA optimization timed out for individual " + i + ". Using original instead.");
+                            future.cancel(true);
+                        } finally {
+                            executor.shutdownNow();
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error in SA optimization for individual " + i + ": " + e.getMessage());
+                        // Keep the original individual if SA fails
+                    }
+
+                    // Print progress every 5 individuals
+                    if (i % 5 == 0) {
+                        System.out.println("Processed " + i + "/" + newPopulation.size() + " individuals");
+                    }
                 }
 
-                // Apply SA with timeout protection
-                List<Route> improvedIndividual;
-                try {
-                    improvedIndividual = simulatedAnnealing.optimize(individual);
-                    newPopulation.set(i, improvedIndividual);
-                } catch (Exception e) {
-                    System.err.println("Error in SA optimization for individual " + i + ": " + e.getMessage());
-                    // Keep the original individual if SA fails
+                if (terminateEarly) {
+                    System.out.println("Early termination triggered during SA phase.");
+                    break;
                 }
-            }
 
-            // Find current best solution
-            List<Route> currentBest = getBestIndividual(newPopulation);
-            double currentFitness = calculateFitness(currentBest);
+                // Find current best solution
+                List<Route> currentBest = getBestIndividual(newPopulation);
+                double currentFitness = calculateFitness(currentBest);
 
-            // Apply 3-opt local search to the best solution (lines 22-32 in Algorithm 7)
-            if (currentFitness < bestFitness) {
-                double improvement = bestFitness - currentFitness;
-                double relativeImprovement = improvement / bestFitness * 100;
+                // Apply 3-opt local search to the best solution with timeout protection
+                if (currentFitness < bestFitness) {
+                    double improvement = bestFitness - currentFitness;
+                    double relativeImprovement = improvement / bestFitness * 100;
 
-                bestSolution = currentBest;
-                bestFitness = currentFitness;
-                noImprovements = 0;
-                System.out.println("New best solution found with fitness: " + bestFitness +
-                        " (Improvement: " + relativeImprovement + "%)");
+                    bestSolution = currentBest;
+                    bestFitness = currentFitness;
+                    noImprovements = 0;
+                    System.out.println("New best solution found with fitness: " + bestFitness +
+                            " (Improvement: " + relativeImprovement + "%)");
 
-                // Reset previous best for tracking significant improvements
-                previousBestFitness = bestFitness;
-            } else {
-                noImprovements++;
+                    // Reset previous best for tracking significant improvements
+                    previousBestFitness = bestFitness;
+                } else {
+                    noImprovements++;
 
-                // Check if we're making minimal progress
-                if (Math.abs(previousBestFitness - bestFitness) < 0.001 && noImprovements > 20) {
-                    System.out.println("Minimal progress detected. Accelerating termination.");
-                    noImprovements = noImprovementThreshold;  // Force termination
+                    // Check if we're making minimal progress
+                    if (Math.abs(previousBestFitness - bestFitness) < 0.001 && noImprovements > 20) {
+                        System.out.println("Minimal progress detected. Accelerating termination.");
+                        noImprovements = noImprovementThreshold;  // Force termination
+                    }
                 }
-            }
 
-            // Update population for next iteration
-            individuals = newPopulation;
-            iterations++;
+                // Update population for next iteration
+                individuals = newPopulation;
+                iterations++;
 
-            if (iterations % 10 == 0) {
-                long elapsedTime = (System.currentTimeMillis() - startTime) / 1000;
-                System.out.println("Iteration " + iterations +
-                        ", Best fitness: " + bestFitness +
-                        ", No improvements: " + noImprovements +
-                        ", Time elapsed: " + elapsedTime + " seconds");
+                if (iterations % 10 == 0) {
+                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    System.out.println("Iteration " + iterations +
+                            ", Best fitness: " + bestFitness +
+                            ", No improvements: " + noImprovements +
+                            ", Time elapsed: " + elapsed + " seconds");
+                }
+
+            } catch (Exception e) {
+                System.err.println("Error in optimization iteration " + iterations + ": " + e.getMessage());
+                e.printStackTrace();
+                noImprovements++;  // Count as no improvement to help terminate if errors persist
             }
         }
 
@@ -182,14 +273,110 @@ public class HybridAlgorithm {
             System.out.println("Optimization terminated: no improvement threshold reached");
         } else if (totalIterations >= 1000) {
             System.out.println("Optimization terminated: safety iteration limit reached");
+        } else if (terminateEarly) {
+            System.out.println("Optimization terminated: early termination flag set");
         } else {
             System.out.println("Optimization terminated: time limit reached");
         }
 
-        System.out.println("Optimization completed after " + iterations + " iterations");
+        long totalTime = (System.currentTimeMillis() - startTime) / 1000;
+        System.out.println("Optimization completed after " + iterations + " iterations and " + totalTime + " seconds");
         System.out.println("Best solution fitness: " + bestFitness);
 
+        // Handle case where no solution was found
+        if (bestSolution.isEmpty()) {
+            System.out.println("WARNING: No viable solution found. Creating a fallback solution.");
+            return createFallbackSolution();
+        }
+
         return bestSolution;
+    }
+
+    /**
+     * Create a simple fallback solution when optimization fails
+     * This ensures we always return something usable
+     */
+    private List<Route> createFallbackSolution() {
+        System.out.println("Creating fallback solution with simple routes");
+        List<Route> fallbackSolution = new ArrayList<>();
+
+        // Find depot
+        Location depot = locations.stream()
+                .filter(loc -> loc.getType().equalsIgnoreCase("depot"))
+                .findFirst()
+                .orElse(null);
+
+        if (depot == null) {
+            System.err.println("CRITICAL ERROR: No depot found in locations. Cannot create fallback solution.");
+            return new ArrayList<>();
+        }
+
+        // Find customers
+        List<Location> customers = locations.stream()
+                .filter(loc -> !loc.getType().equalsIgnoreCase("depot") &&
+                        !loc.getType().equalsIgnoreCase("charging_station"))
+                .collect(Collectors.toList());
+
+        if (customers.isEmpty()) {
+            System.err.println("No customers found in locations. Returning empty solution.");
+            return new ArrayList<>();
+        }
+
+        // Create a route for each drone
+        int droneIndex = 0;
+        for (List<Location> customerBatch : partitionCustomers(customers, drones.size())) {
+            if (droneIndex >= drones.size()) break;
+
+            Drone drone = drones.get(droneIndex);
+            List<Location> routeLocations = new ArrayList<>();
+
+            // Start at depot
+            routeLocations.add(depot);
+
+            // Add customers that fit in the drone's capacity
+            double remainingCapacity = drone.getPayloadCapacity();
+            for (Location customer : customerBatch) {
+                if (customer.getDemand() <= remainingCapacity) {
+                    routeLocations.add(customer);
+                    remainingCapacity -= customer.getDemand();
+                }
+            }
+
+            // End at depot
+            routeLocations.add(depot);
+
+            // Create route and add to solution
+            if (routeLocations.size() > 2) { // Only create route if it has at least one customer
+                Route route = new Route(drone, routeLocations, weatherZones, obstacles, rechargingStations);
+                fallbackSolution.add(route);
+            }
+
+            droneIndex++;
+        }
+
+        System.out.println("Created fallback solution with " + fallbackSolution.size() + " routes");
+        return fallbackSolution;
+    }
+
+    /**
+     * Partition customers into approximately equal batches
+     */
+    private List<List<Location>> partitionCustomers(List<Location> customers, int batches) {
+        List<List<Location>> result = new ArrayList<>();
+        if (customers.isEmpty() || batches <= 0) return result;
+
+        int batchSize = Math.max(1, customers.size() / batches);
+
+        for (int i = 0; i < batches; i++) {
+            int start = i * batchSize;
+            int end = Math.min(start + batchSize, customers.size());
+
+            if (start >= customers.size()) break;
+
+            result.add(new ArrayList<>(customers.subList(start, end)));
+        }
+
+        return result;
     }
 
     /**
