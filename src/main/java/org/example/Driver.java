@@ -24,7 +24,6 @@ public class Driver {
         try {
             System.out.println("Loading data...");
 
-            // Validate file paths before loading
             validateFilePath("src/main/java/org/example/resource/locations.txt");
             validateFilePath("src/main/java/org/example/resource/drones.txt");
             validateFilePath("src/main/java/org/example/resource/weather_zone.txt");
@@ -41,7 +40,7 @@ public class Driver {
             System.out.println("\n==== Running Hybrid Algorithm with Enhanced Timeout Protection ====\n");
 
             // Set up execution with multiple timeout mechanisms
-            final int TIMEOUT_SECONDS = 180; // 3 minutes timeout
+            final int TIMEOUT_SECONDS = 180;
             ExecutorService executor = Executors.newSingleThreadExecutor();
             final AtomicBoolean algorithmRunning = new AtomicBoolean(true);
 
@@ -72,7 +71,7 @@ public class Driver {
             watchdog.start();
 
             // Submit the task
-            Future<List<Route>> future = executor.submit(() -> algorithm.findOptimalRoutes());
+            Future<List<Route>> future = executor.submit(algorithm::findOptimalRoutes);
 
             List<Route> optimalRoutes;
             try {
@@ -123,7 +122,6 @@ public class Driver {
                 System.err.println("Error executing algorithm: " + e.getMessage());
                 e.printStackTrace();
             } finally {
-                // Make sure resources are cleaned up
                 executor.shutdownNow();
                 try {
                     if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {

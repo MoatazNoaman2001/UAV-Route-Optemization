@@ -44,7 +44,6 @@ public class RouteMapViewer extends JPanel {
             routeSelector.addItem("Route #" + (i+1) + " (Drone #" + route.getDrone().getId() + ")");
         }
 
-        // Save map button
         saveMapButton = new JButton("Save Map as SVG");
 
         controlPanel.add(routeLabel);
@@ -60,22 +59,12 @@ public class RouteMapViewer extends JPanel {
         scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
         add(scrollPane, BorderLayout.CENTER);
 
-        // Add event listeners
-        routeSelector.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                updateMapDisplay();
-            }
-        });
 
-        saveMapButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                saveMapAsSVG();
-            }
-        });
+        // Event Listener
+        routeSelector.addActionListener(e -> updateMapDisplay());
+        saveMapButton.addActionListener(e -> saveMapAsSVG());
 
-        // Initialize with first route
+
         if (!routes.isEmpty()) {
             updateMapDisplay();
         }
@@ -86,10 +75,10 @@ public class RouteMapViewer extends JPanel {
         if (selectedIndex >= 0 && selectedIndex < routes.size()) {
             currentRoute = routes.get(selectedIndex);
 
-            // Remove old map panel
+            // Remove prev map
             mapPanel.removeAll();
 
-            // Create new map panel
+            // Create and add new map
             currentMapPanel = new RouteMapPanel(currentRoute, obstacles, weatherZones);
             mapPanel.add(currentMapPanel, BorderLayout.CENTER);
 
@@ -141,9 +130,6 @@ public class RouteMapViewer extends JPanel {
         }
     }
 
-    /**
-     * Inner class for the map panel that renders the route
-     */
     private class RouteMapPanel extends JPanel {
         private Route route;
         private List<Obstacle> obstacles;
